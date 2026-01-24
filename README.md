@@ -22,14 +22,53 @@ Generate beautiful, minimalist map posters for any city in the world.
 
 ## Installation
 
+### Using UV (Recommended)
+
 ```bash
-pip install -r requirements.txt
+# Clone the repository
+git clone https://github.com/your-username/maptoposter.git
+cd maptoposter
+
+# Install dependencies and run
+uv sync
+uv run maptoposter --help
+```
+
+### Using pip
+
+```bash
+pip install maptoposter
+```
+
+### Development Setup
+
+```bash
+# Clone and install with dev dependencies
+git clone https://github.com/your-username/maptoposter.git
+cd maptoposter
+uv sync --all-extras
+
+# Run tests
+uv run pytest
+
+# Run linter
+uv run ruff check src/
+
+# Run type checker
+uv run mypy src/
 ```
 
 ## Usage
 
 ```bash
-python create_map_poster.py --city <city> --country <country> [options]
+# Using UV (recommended)
+uv run maptoposter --city <city> --country <country> [options]
+
+# Or if installed globally
+maptoposter --city <city> --country <country> [options]
+
+# Or using Python module syntax
+python -m maptoposter --city <city> --country <country> [options]
 ```
 
 ### Options
@@ -63,37 +102,37 @@ Use these values for `-W` and `-H` to target specific resolutions:
 
 ```bash
 # Iconic grid patterns
-python create_map_poster.py -c "New York" -C "USA" -t noir -d 12000           # Manhattan grid
-python create_map_poster.py -c "Barcelona" -C "Spain" -t warm_beige -d 8000   # Eixample district
+uv run maptoposter -c "New York" -C "USA" -t noir -d 12000           # Manhattan grid
+uv run maptoposter -c "Barcelona" -C "Spain" -t warm_beige -d 8000   # Eixample district
 
 # Waterfront & canals
-python create_map_poster.py -c "Venice" -C "Italy" -t blueprint -d 4000       # Canal network
-python create_map_poster.py -c "Amsterdam" -C "Netherlands" -t ocean -d 6000  # Concentric canals
-python create_map_poster.py -c "Dubai" -C "UAE" -t midnight_blue -d 15000     # Palm & coastline
+uv run maptoposter -c "Venice" -C "Italy" -t blueprint -d 4000       # Canal network
+uv run maptoposter -c "Amsterdam" -C "Netherlands" -t ocean -d 6000  # Concentric canals
+uv run maptoposter -c "Dubai" -C "UAE" -t midnight_blue -d 15000     # Palm & coastline
 
 # Radial patterns
-python create_map_poster.py -c "Paris" -C "France" -t pastel_dream -d 10000   # Haussmann boulevards
-python create_map_poster.py -c "Moscow" -C "Russia" -t noir -d 12000          # Ring roads
+uv run maptoposter -c "Paris" -C "France" -t pastel_dream -d 10000   # Haussmann boulevards
+uv run maptoposter -c "Moscow" -C "Russia" -t noir -d 12000          # Ring roads
 
 # Organic old cities
-python create_map_poster.py -c "Tokyo" -C "Japan" -t japanese_ink -d 15000    # Dense organic streets
-python create_map_poster.py -c "Marrakech" -C "Morocco" -t terracotta -d 5000 # Medina maze
-python create_map_poster.py -c "Rome" -C "Italy" -t warm_beige -d 8000        # Ancient layout
+uv run maptoposter -c "Tokyo" -C "Japan" -t japanese_ink -d 15000    # Dense organic streets
+uv run maptoposter -c "Marrakech" -C "Morocco" -t terracotta -d 5000 # Medina maze
+uv run maptoposter -c "Rome" -C "Italy" -t warm_beige -d 8000        # Ancient layout
 
 # Coastal cities
-python create_map_poster.py -c "San Francisco" -C "USA" -t sunset -d 10000    # Peninsula grid
-python create_map_poster.py -c "Sydney" -C "Australia" -t ocean -d 12000      # Harbor city
-python create_map_poster.py -c "Mumbai" -C "India" -t contrast_zones -d 18000 # Coastal peninsula
+uv run maptoposter -c "San Francisco" -C "USA" -t sunset -d 10000    # Peninsula grid
+uv run maptoposter -c "Sydney" -C "Australia" -t ocean -d 12000      # Harbor city
+uv run maptoposter -c "Mumbai" -C "India" -t contrast_zones -d 18000 # Coastal peninsula
 
 # River cities
-python create_map_poster.py -c "London" -C "UK" -t noir -d 15000              # Thames curves
-python create_map_poster.py -c "Budapest" -C "Hungary" -t copper_patina -d 8000  # Danube split
+uv run maptoposter -c "London" -C "UK" -t noir -d 15000              # Thames curves
+uv run maptoposter -c "Budapest" -C "Hungary" -t copper_patina -d 8000  # Danube split
 
 # List available themes
-python create_map_poster.py --list-themes
+uv run maptoposter --list-themes
 
 # Generate posters for every theme
-python create_map_poster.py -c "Tokyo" -C "Japan" --all-themes
+uv run maptoposter -c "Tokyo" -C "Japan" --all-themes
 ```
 
 ### Distance Guide
@@ -160,43 +199,55 @@ Create a JSON file in `themes/` directory:
 ## Project Structure
 
 ```
-map_poster/
-├── create_map_poster.py          # Main script
-├── themes/               # Theme JSON files
-├── fonts/                # Roboto font files
-├── posters/              # Generated posters
+maptoposter/
+├── src/
+│   └── maptoposter/
+│       ├── __init__.py       # Package version
+│       ├── __main__.py       # python -m entry point
+│       ├── cache.py          # Caching utilities
+│       ├── cli.py            # Command-line interface
+│       ├── config.py         # Configuration & themes
+│       ├── fonts.py          # Font management
+│       ├── geo.py            # Geographic data fetching
+│       ├── render.py         # Map rendering
+│       └── data/
+│           ├── themes/       # Theme JSON files
+│           └── fonts/        # Roboto font files
+├── tests/                    # Unit tests
+├── posters/                  # Generated posters
+├── pyproject.toml            # Project configuration
 └── README.md
 ```
 
 ## Hacker's Guide
 
-Quick reference for contributors who want to extend or modify the script.
+Quick reference for contributors who want to extend or modify the package.
 
 ### Architecture Overview
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
-│   CLI Parser    │────▶│  Geocoding   │────▶│  Data Fetching  │
-│   (argparse)    │     │  (Nominatim) │     │    (OSMnx)      │
+│   CLI (cli.py)  │────▶│  Geocoding   │────▶│  Data Fetching  │
+│   (argparse)    │     │  (geo.py)    │     │    (geo.py)     │
 └─────────────────┘     └──────────────┘     └─────────────────┘
                                                      │
                         ┌──────────────┐             ▼
                         │    Output    │◀────┌─────────────────┐
-                        │  (matplotlib)│     │   Rendering     │
-                        └──────────────┘     │  (matplotlib)   │
+                        │  (matplotlib)│     │ PosterRenderer  │
+                        └──────────────┘     │  (render.py)    │
                                              └─────────────────┘
 ```
 
-### Key Functions
+### Module Reference
 
-| Function | Purpose | Modify when... |
-|----------|---------|----------------|
-| `get_coordinates()` | City → lat/lon via Nominatim | Switching geocoding provider |
-| `create_poster()` | Main rendering pipeline | Adding new map layers |
-| `get_edge_colors_by_type()` | Road color by OSM highway tag | Changing road styling |
-| `get_edge_widths_by_type()` | Road width by importance | Adjusting line weights |
-| `create_gradient_fade()` | Top/bottom fade effect | Modifying gradient overlay |
-| `load_theme()` | JSON theme → dict | Adding new theme properties |
+| Module | Purpose | Key Classes/Functions |
+|--------|---------|----------------------|
+| `cli.py` | Command-line interface | `main()`, `cli()`, `create_parser()` |
+| `config.py` | Configuration & themes | `PosterConfig`, `load_theme()`, `get_available_themes()` |
+| `geo.py` | Geographic data | `get_coordinates()`, `fetch_graph()`, `fetch_features()` |
+| `render.py` | Map rendering | `PosterRenderer`, `create_poster()` |
+| `cache.py` | Data caching | `cache_get()`, `cache_set()` |
+| `fonts.py` | Font management | `FontSet`, `load_fonts()` |
 
 ### Rendering Layers (z-order)
 
@@ -209,66 +260,57 @@ z=1   Water (blue polygons)
 z=0   Background color
 ```
 
-### OSM Highway Types → Road Hierarchy
-
-```python
-# In get_edge_colors_by_type() and get_edge_widths_by_type()
-motorway, motorway_link     → Thickest (1.2), darkest
-trunk, primary              → Thick (1.0)
-secondary                   → Medium (0.8)
-tertiary                    → Thin (0.6)
-residential, living_street  → Thinnest (0.4), lightest
-```
-
 ### Adding New Features
 
 **New map layer (e.g., railways):**
-```python
-# In create_poster(), after parks fetch:
-try:
-    railways = ox.features_from_point(point, tags={'railway': 'rail'}, dist=dist)
-except:
-    railways = None
 
-# Then plot before roads:
+In `render.py`, modify the `PosterRenderer.render()` method:
+
+```python
+# After parks fetch:
+railways = fetch_features(
+    point, compensated_dist,
+    tags={'railway': 'rail'},
+    name='railways',
+)
+
+# Plot before roads:
 if railways is not None and not railways.empty:
-    railways.plot(ax=ax, color=THEME['railway'], linewidth=0.5, zorder=2.5)
+    railways_lines = railways[railways.geometry.type.isin(['LineString', 'MultiLineString'])]
+    if not railways_lines.empty:
+        railways_lines.plot(ax=ax, color=self.theme['railway'], linewidth=0.5, zorder=2.5)
 ```
 
 **New theme property:**
 1. Add to theme JSON: `"railway": "#FF0000"`
-2. Use in code: `THEME['railway']`
-3. Add fallback in `load_theme()` default dict
+2. Use in code: `self.theme['railway']`
+3. Add fallback in `config.py` `_get_default_theme()`
 
-### Typography Positioning
+### Development Commands
 
-All text uses `transform=ax.transAxes` (0-1 normalized coordinates):
-```
-y=0.14  City name (spaced letters)
-y=0.125 Decorative line
-y=0.10  Country name
-y=0.07  Coordinates
-y=0.02  Attribution (bottom-right)
-```
+```bash
+# Run tests with coverage
+uv run pytest --cov=maptoposter
 
-### Useful OSMnx Patterns
+# Format code
+uv run ruff format src/
 
-```python
-# Get all buildings
-buildings = ox.features_from_point(point, tags={'building': True}, dist=dist)
+# Lint and fix
+uv run ruff check src/ --fix
 
-# Get specific amenities
-cafes = ox.features_from_point(point, tags={'amenity': 'cafe'}, dist=dist)
+# Type check
+uv run mypy src/
 
-# Different network types
-G = ox.graph_from_point(point, dist=dist, network_type='drive')  # roads only
-G = ox.graph_from_point(point, dist=dist, network_type='bike')   # bike paths
-G = ox.graph_from_point(point, dist=dist, network_type='walk')   # pedestrian
+# Build package
+uv build
 ```
 
-### Performance Tips
+### Environment Variables
 
-- Large `dist` values (>20km) = slow downloads + memory heavy
-- Cache coordinates locally to avoid Nominatim rate limits
-- Use `network_type='drive'` instead of `'all'` for faster renders
-- Reduce `dpi` from 300 to 150 for quick previews
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MAPTOPOSTER_CACHE_DIR` | Directory for cached OSM data | `.cache` |
+
+## License
+
+MIT
