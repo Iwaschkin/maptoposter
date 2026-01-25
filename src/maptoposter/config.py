@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import cast
 
 __all__ = [
     "PosterConfig",
+    "ThemeValidationError",
     "generate_output_filename",
     "get_available_themes",
     "get_fonts_dir",
@@ -19,6 +21,31 @@ __all__ = [
     "get_themes_dir",
     "load_theme",
 ]
+
+
+class ThemeValidationError(ValueError):
+    """Raised when theme file is missing required keys."""
+
+    pass
+
+
+# Required keys that every theme must have
+REQUIRED_THEME_KEYS = frozenset(
+    {
+        "name",
+        "bg",
+        "text",
+        "gradient_color",
+        "water",
+        "parks",
+        "road_motorway",
+        "road_primary",
+        "road_secondary",
+        "road_tertiary",
+        "road_residential",
+        "road_default",
+    }
+)
 
 
 def get_package_dir() -> Path:
@@ -67,10 +94,11 @@ def get_available_themes() -> list[str]:
 
     Returns:
         A sorted list of theme names (without .json extension).
+        Empty list if themes directory doesn't exist.
     """
     themes_dir = get_themes_dir()
     if not themes_dir.exists():
-        themes_dir.mkdir(parents=True, exist_ok=True)
+        # Don't create directory - just return empty list (CR-0012 fix)
         return []
 
     return sorted(f.stem for f in themes_dir.glob("*.json"))
@@ -84,6 +112,11 @@ def load_theme(theme_name: str = "feature_based") -> dict[str, str]:
 
     Returns:
         A dictionary containing theme colors and settings.
+
+    Raises:
+        ThemeValidationError: If theme is missing required keys.
+        ValueError: If theme file is not a valid JSON object.
+        FileNotFoundError: If theme file does not exist.
     """
     themes_dir = get_themes_dir()
     theme_file = themes_dir / f"{theme_name}.json"
@@ -97,6 +130,14 @@ def load_theme(theme_name: str = "feature_based") -> dict[str, str]:
         if not isinstance(theme, dict):
             raise ValueError(f"Theme file '{theme_file}' is not a JSON object.")
         theme_dict = cast(dict[str, str], theme)
+
+        # Validate required keys (CR-0006 fix)
+        missing_keys = REQUIRED_THEME_KEYS - theme_dict.keys()
+        if missing_keys:
+            raise ThemeValidationError(
+                f"Theme '{theme_name}' is missing required keys: {', '.join(sorted(missing_keys))}"
+            )
+
         print(f"✓ Loaded theme: {theme_dict.get('name', theme_name)}")
         if description := theme_dict.get("description"):
             print(f"  {description}")
@@ -121,6 +162,40 @@ def _get_default_theme() -> dict[str, str]:
     }
 
 
+def _sanitize_filename(name: str) -> str:
+    """Sanitize string for use in filenames across platforms.
+
+    Replaces invalid characters and handles Windows reserved names.
+
+    Args:
+        name: The string to sanitize.
+
+    Returns:
+        A safe filename string.
+    """
+    # Replace invalid characters with underscore
+    # Windows: < > : " / \ | ? *
+    # Also replace spaces and commas for consistency
+    sanitized = re.sub(r'[<>:"/\\|?*\s,\']', "_", name)
+
+    # Remove leading/trailing dots and spaces (Windows issue)
+    sanitized = sanitized.strip(". ")
+
+    # Collapse multiple underscores
+    sanitized = re.sub(r"_+", "_", sanitized)
+
+    # Handle Windows reserved names
+    reserved = {"CON", "PRN", "AUX", "NUL"}
+    reserved.update(f"COM{i}" for i in range(1, 10))
+    reserved.update(f"LPT{i}" for i in range(1, 10))
+
+    if sanitized.upper() in reserved:
+        sanitized = f"_{sanitized}"
+
+    # Ensure non-empty
+    return sanitized or "unnamed"
+
+
 def generate_output_filename(
     city: str,
     theme_name: str,
@@ -138,9 +213,11 @@ def generate_output_filename(
     """
     posters_dir = get_posters_dir()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    city_slug = city.lower().replace(" ", "_").replace(",", "")
+    # Use sanitize function for Windows compatibility (CR-0022 fix)
+    city_slug = _sanitize_filename(city.lower())
+    theme_slug = _sanitize_filename(theme_name.lower())
     ext = output_format.lower()
-    filename = f"{city_slug}_{theme_name}_{timestamp}.{ext}"
+    filename = f"{city_slug}_{theme_slug}_{timestamp}.{ext}"
     return posters_dir / filename
 
 

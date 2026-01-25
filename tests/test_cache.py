@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from maptoposter.cache import cache_get, cache_set, get_cache_dir
+from maptoposter.cache import CacheType, cache_get, cache_set, get_cache_dir
 
 
 class TestCacheDir:
@@ -29,29 +29,32 @@ class TestCacheDir:
 class TestCacheOperations:
     """Tests for cache_get and cache_set functions."""
 
-    def test_cache_roundtrip(self, tmp_path: Path) -> None:
-        """Test that values can be cached and retrieved."""
+    def test_cache_coords_roundtrip(self, tmp_path: Path) -> None:
+        """Test that coordinate tuples can be cached and retrieved."""
         with patch.dict("os.environ", {"MAPTOPOSTER_CACHE_DIR": str(tmp_path)}):
-            test_data = {"key": "value", "number": 42}
-            cache_set("test_key", test_data)
+            test_coords = (40.7128, -74.0060)
+            result = cache_set("test_coords", test_coords, CacheType.COORDS)
+            assert result is True
 
-            result = cache_get("test_key")
-            assert result == test_data
+            retrieved = cache_get("test_coords", CacheType.COORDS)
+            assert retrieved == test_coords
 
     def test_cache_miss(self, tmp_path: Path) -> None:
         """Test that cache miss returns None."""
         with patch.dict("os.environ", {"MAPTOPOSTER_CACHE_DIR": str(tmp_path)}):
-            result = cache_get("nonexistent_key")
+            result = cache_get("nonexistent_key", CacheType.COORDS)
             assert result is None
 
-    def test_cache_complex_objects(self, tmp_path: Path) -> None:
-        """Test caching of complex nested objects."""
+    def test_cache_set_returns_bool(self, tmp_path: Path) -> None:
+        """Test that cache_set returns success indicator."""
         with patch.dict("os.environ", {"MAPTOPOSTER_CACHE_DIR": str(tmp_path)}):
-            test_data = {
-                "coords": (40.7128, -74.0060),
-                "nested": {"a": [1, 2, 3], "b": {"c": "d"}},
-            }
-            cache_set("complex_key", test_data)
+            test_data = {"key": "value", "number": 42}
+            result = cache_set("bool_test", test_data, CacheType.COORDS)
+            assert isinstance(result, bool)
+            assert result is True
 
-            result = cache_get("complex_key")
-            assert result == test_data
+    def test_cache_get_returns_none_on_missing(self, tmp_path: Path) -> None:
+        """Test that cache_get returns None for missing keys, not raises."""
+        with patch.dict("os.environ", {"MAPTOPOSTER_CACHE_DIR": str(tmp_path)}):
+            result = cache_get("definitely_missing", CacheType.COORDS)
+            assert result is None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from .config import get_fonts_dir
 
 
 __all__ = ["FontSet", "load_fonts"]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -40,9 +43,10 @@ class FontSet:
         Returns:
             FontProperties configured for the requested style.
         """
-        font_path = getattr(self, weight, self.regular)
+        # Try to get the requested weight, fall back to regular, then None
+        font_path = getattr(self, weight, None) or self.regular
 
-        if font_path and font_path.exists():
+        if font_path is not None and font_path.exists():
             return FontProperties(fname=str(font_path), size=size)
 
         # Fallback to system fonts
@@ -76,7 +80,7 @@ def load_fonts() -> FontSet:
     for weight in ["bold", "regular", "light"]:
         path = getattr(font_set, weight)
         if path and not path.exists():
-            print(f"⚠ Font not found: {path}")
+            logger.warning("Font not found: %s", path)
             setattr(font_set, weight, None)
 
     return font_set

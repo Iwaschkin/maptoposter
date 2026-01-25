@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Generate beautiful, minimalist map posters for any city using OpenStreetMap data"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 authors = [
     { name = "MapToPoster Contributors" }
 ]
@@ -45,6 +45,7 @@ dependencies = [
     "osmnx>=2.0.0",
     "pandas>=2.0.0",
     "pillow>=10.0.0",
+    "pyarrow",
     "scipy>=1.13.0",
     "shapely>=2.0.0",
     "tqdm>=4.65.0",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 from typing import TYPE_CHECKING, Any
 
 import matplotlib.colors as mcolors
@@ -9,12 +11,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
 from matplotlib.axes import Axes
+from pyproj.exceptions import CRSError
 from tqdm import tqdm
 
 from .config import PosterConfig
 from .fonts import load_fonts
 from .geo import fetch_features, fetch_graph, get_crop_limits
-
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,6 +24,49 @@ if TYPE_CHECKING:
     from networkx import MultiDiGraph
 
 __all__ = ["PosterRenderer", "create_poster"]
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Constants (CR-0011, CR-0019)
+# =============================================================================
+
+
+class ZOrder:
+    """Z-order constants for layer stacking."""
+
+    WATER = 1
+    PARKS = 2
+    ROADS = 3
+    GRADIENT = 10
+    TEXT = 11
+
+
+# Typography positioning constants
+TEXT_CENTER_X = 0.5
+CITY_NAME_Y_POS = 0.14
+COUNTRY_LABEL_Y_POS = 0.10
+COORDS_Y_POS = 0.07
+DIVIDER_Y_POS = 0.125
+ATTRIBUTION_X_POS = 0.98
+ATTRIBUTION_Y_POS = 0.02
+
+# Gradient constants
+GRADIENT_HEIGHT_FRACTION = 0.25
+
+# Road width constants by highway type
+ROAD_WIDTH_MOTORWAY = 1.2
+ROAD_WIDTH_PRIMARY = 1.0
+ROAD_WIDTH_SECONDARY = 0.8
+ROAD_WIDTH_TERTIARY = 0.6
+ROAD_WIDTH_DEFAULT = 0.4
+
+# Base font sizes (at 12 inches width reference)
+BASE_FONT_MAIN = 60
+BASE_FONT_SUB = 22
+BASE_FONT_COORDS = 14
+BASE_FONT_ATTR = 8
 
 
 class PosterRenderer:
@@ -42,7 +87,7 @@ class PosterRenderer:
         ax: Axes,
         color: str,
         location: str = "bottom",
-        zorder: int = 10,
+        zorder: int = ZOrder.GRADIENT,
     ) -> None:
         """Create a fade effect at the top or bottom of the map.
 
@@ -64,10 +109,10 @@ class PosterRenderer:
         if location == "bottom":
             my_colors[:, 3] = np.linspace(1, 0, 256)
             extent_y_start = 0.0
-            extent_y_end = 0.25
+            extent_y_end = GRADIENT_HEIGHT_FRACTION
         else:
             my_colors[:, 3] = np.linspace(0, 1, 256)
-            extent_y_start = 0.75
+            extent_y_start = 1.0 - GRADIENT_HEIGHT_FRACTION
             extent_y_end = 1.0
 
         custom_cmap = mcolors.ListedColormap(my_colors)
@@ -140,15 +185,15 @@ class PosterRenderer:
                 highway = highway[0] if highway else "unclassified"
 
             if highway in ["motorway", "motorway_link"]:
-                width = 1.2
+                width = ROAD_WIDTH_MOTORWAY
             elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
-                width = 1.0
+                width = ROAD_WIDTH_PRIMARY
             elif highway in ["secondary", "secondary_link"]:
-                width = 0.8
+                width = ROAD_WIDTH_SECONDARY
             elif highway in ["tertiary", "tertiary_link"]:
-                width = 0.6
+                width = ROAD_WIDTH_TERTIARY
             else:
-                width = 0.4
+                width = ROAD_WIDTH_DEFAULT
 
             edge_widths.append(width)
 
@@ -161,54 +206,52 @@ class PosterRenderer:
         scale_factor: float,
     ) -> None:
         """Add text elements to the poster."""
-        # Base font sizes (at 12 inches width)
-        base_main = 60
-        base_sub = 22
-        base_coords = 14
-        base_attr = 8
-
-        # Create spaced city name
-        city = self.config.city
-        spaced_city = "  ".join(list(city.upper()))
+        # Use name_label if provided, otherwise use city (CR-0003 fix)
+        display_name = self.config.name_label or self.config.city
+        spaced_city = "  ".join(list(display_name.upper()))
 
         # Dynamically adjust font size based on city name length
-        base_adjusted_main = base_main * scale_factor
-        city_char_count = len(city)
+        base_adjusted_main = BASE_FONT_MAIN * scale_factor
+        city_char_count = len(display_name)
 
         if city_char_count > 10:
             length_factor = 10 / city_char_count
-            adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
+            adjusted_font_size = max(
+                base_adjusted_main * length_factor, 10 * scale_factor
+            )
         else:
             adjusted_font_size = base_adjusted_main
 
         font_main = self.fonts.get_properties("bold", adjusted_font_size)
-        font_sub = self.fonts.get_properties("light", base_sub * scale_factor)
-        font_coords = self.fonts.get_properties("regular", base_coords * scale_factor)
-        font_attr = self.fonts.get_properties("light", base_attr)
+        font_sub = self.fonts.get_properties("light", BASE_FONT_SUB * scale_factor)
+        font_coords = self.fonts.get_properties(
+            "regular", BASE_FONT_COORDS * scale_factor
+        )
+        font_attr = self.fonts.get_properties("light", BASE_FONT_ATTR)
 
         # City name
         ax.text(
-            0.5,
-            0.14,
+            TEXT_CENTER_X,
+            CITY_NAME_Y_POS,
             spaced_city,
             transform=ax.transAxes,
             color=self.theme["text"],
             ha="center",
             fontproperties=font_main,
-            zorder=11,
+            zorder=ZOrder.TEXT,
         )
 
         # Country label
         country_text = self.config.country_label or self.config.country
         ax.text(
-            0.5,
-            0.10,
+            TEXT_CENTER_X,
+            COUNTRY_LABEL_Y_POS,
             country_text.upper(),
             transform=ax.transAxes,
             color=self.theme["text"],
             ha="center",
             fontproperties=font_sub,
-            zorder=11,
+            zorder=ZOrder.TEXT,
         )
 
         # Coordinates
@@ -219,31 +262,31 @@ class PosterRenderer:
             coords = f"{abs(lat):.4f}° S / {abs(lon):.4f}° {'E' if lon >= 0 else 'W'}"
 
         ax.text(
-            0.5,
-            0.07,
+            TEXT_CENTER_X,
+            COORDS_Y_POS,
             coords,
             transform=ax.transAxes,
             color=self.theme["text"],
             alpha=0.7,
             ha="center",
             fontproperties=font_coords,
-            zorder=11,
+            zorder=ZOrder.TEXT,
         )
 
         # Divider line
         ax.plot(
             [0.4, 0.6],
-            [0.125, 0.125],
+            [DIVIDER_Y_POS, DIVIDER_Y_POS],
             transform=ax.transAxes,
             color=self.theme["text"],
             linewidth=1 * scale_factor,
-            zorder=11,
+            zorder=ZOrder.TEXT,
         )
 
         # Attribution
         ax.text(
-            0.98,
-            0.02,
+            ATTRIBUTION_X_POS,
+            ATTRIBUTION_Y_POS,
             "© OpenStreetMap contributors",
             transform=ax.transAxes,
             color=self.theme["text"],
@@ -251,32 +294,40 @@ class PosterRenderer:
             ha="right",
             va="bottom",
             fontproperties=font_attr,
-            zorder=11,
+            zorder=ZOrder.TEXT,
         )
 
-    def render(self, point: tuple[float, float], output_file: Path) -> None:
+    def render(
+        self,
+        point: tuple[float, float],
+        output_file: Path,
+        show_progress: bool = True,
+    ) -> None:
         """Render the poster and save to file.
 
         Args:
             point: The center coordinates (latitude, longitude).
             output_file: The output file path.
+            show_progress: Whether to display a progress bar (TTY only).
         """
         config = self.config
         city, country = config.city, config.country
         dist = config.distance
         width, height = config.width, config.height
 
-        print(f"\nGenerating map for {city}, {country}...")
+        logger.info("Generating map for %s, %s...", city, country)
 
         # Calculate compensated distance for viewport crop
         compensated_dist = dist * (max(height, width) / min(height, width)) / 4
 
         # Fetch data with progress bar
+        show_progress = show_progress and sys.stderr.isatty()
         with tqdm(
             total=3,
             desc="Fetching map data",
             unit="step",
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
+            disable=not show_progress,
         ) as pbar:
             pbar.set_description("Downloading street network")
             graph = fetch_graph(point, compensated_dist)
@@ -302,8 +353,8 @@ class PosterRenderer:
             )
             pbar.update(1)
 
-        print("✓ All data retrieved successfully!")
-        print("Rendering map...")
+        logger.info("All data retrieved successfully.")
+        logger.info("Rendering map...")
 
         # Setup plot
         fig, ax = plt.subplots(figsize=(width, height), facecolor=self.theme["bg"])
@@ -319,13 +370,20 @@ class PosterRenderer:
             if not water_polys.empty:
                 try:
                     water_polys = ox.projection.project_gdf(water_polys)
-                except Exception:
-                    water_polys = water_polys.to_crs(g_proj.graph["crs"])
+                except (ValueError, CRSError) as e:
+                    logger.debug(
+                        "OSMnx projection failed for water, using direct CRS transform: %s",
+                        e,
+                    )
+                    try:
+                        water_polys = water_polys.to_crs(g_proj.graph["crs"])
+                    except Exception as e2:
+                        logger.warning("Could not project water data: %s", e2)
                 water_polys.plot(
                     ax=ax,
                     facecolor=self.theme["water"],
                     edgecolor="none",
-                    zorder=1,
+                    zorder=ZOrder.WATER,
                 )
 
         # Plot parks
@@ -334,17 +392,24 @@ class PosterRenderer:
             if not parks_polys.empty:
                 try:
                     parks_polys = ox.projection.project_gdf(parks_polys)
-                except Exception:
-                    parks_polys = parks_polys.to_crs(g_proj.graph["crs"])
+                except (ValueError, CRSError) as e:
+                    logger.debug(
+                        "OSMnx projection failed for parks, using direct CRS transform: %s",
+                        e,
+                    )
+                    try:
+                        parks_polys = parks_polys.to_crs(g_proj.graph["crs"])
+                    except Exception as e2:
+                        logger.warning("Could not project parks data: %s", e2)
                 parks_polys.plot(
                     ax=ax,
                     facecolor=self.theme["parks"],
                     edgecolor="none",
-                    zorder=2,
+                    zorder=ZOrder.PARKS,
                 )
 
         # Plot roads
-        print("Applying road hierarchy colors...")
+        logger.info("Applying road hierarchy colors...")
         edge_colors = self.get_edge_colors_by_type(g_proj)
         edge_widths = self.get_edge_widths_by_type(g_proj)
 
@@ -366,15 +431,19 @@ class PosterRenderer:
         ax.set_ylim(crop_ylim)
 
         # Add gradients
-        self.create_gradient_fade(ax, self.theme["gradient_color"], location="bottom", zorder=10)
-        self.create_gradient_fade(ax, self.theme["gradient_color"], location="top", zorder=10)
+        self.create_gradient_fade(
+            ax, self.theme["gradient_color"], location="bottom", zorder=ZOrder.GRADIENT
+        )
+        self.create_gradient_fade(
+            ax, self.theme["gradient_color"], location="top", zorder=ZOrder.GRADIENT
+        )
 
         # Add typography
         scale_factor = width / 12.0
         self._add_typography(ax, point, scale_factor)
 
         # Save
-        print(f"Saving to {output_file}...")
+        logger.info("Saving to %s...", output_file)
 
         fmt = config.output_format.lower()
         save_kwargs: dict[str, Any] = {
@@ -386,10 +455,12 @@ class PosterRenderer:
         if fmt == "png":
             save_kwargs["dpi"] = 300
 
-        plt.savefig(output_file, format=fmt, **save_kwargs)
-        plt.close()
+        try:
+            plt.savefig(output_file, format=fmt, **save_kwargs)
+        finally:
+            plt.close()
 
-        print(f"✓ Done! Poster saved as {output_file}")
+        logger.info("Done! Poster saved as %s", output_file)
 
 
 def create_poster(
@@ -404,6 +475,7 @@ def create_poster(
     country_label: str | None = None,
     name_label: str | None = None,
     theme: dict[str, str] | None = None,
+    show_progress: bool = True,
 ) -> None:
     """Create a map poster for a city.
 
@@ -421,7 +493,11 @@ def create_poster(
         country_label: Override country text on poster.
         name_label: Override city name on poster.
         theme: Theme dictionary (loaded if not provided).
+        show_progress: Whether to display a progress bar (TTY only).
     """
+    # Ensure output directory exists (CR-0023 fix)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
     config = PosterConfig(
         city=city,
         country=country,
@@ -435,4 +511,4 @@ def create_poster(
     )
 
     renderer = PosterRenderer(config)
-    renderer.render(point, output_file)
+    renderer.render(point, output_file, show_progress=show_progress)

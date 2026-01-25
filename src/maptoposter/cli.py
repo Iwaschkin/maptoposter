@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from typing import NoReturn
 
@@ -17,6 +18,8 @@ from .render import PosterRenderer
 
 
 __all__ = ["cli", "main"]
+
+logger = logging.getLogger(__name__)
 
 
 def _print_examples() -> None:
@@ -211,6 +214,12 @@ def cli(args: list[str] | None = None) -> int:
     Returns:
         Exit code (0 for success, non-zero for errors).
     """
+    # Configure logging for CLI usage
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
+
     parser = create_parser()
     parsed = parser.parse_args(args)
 
@@ -222,7 +231,8 @@ def cli(args: list[str] | None = None) -> int:
         return 0
 
     # If no arguments provided, show examples
-    if len(sys.argv) == 1 and args is None:
+    # Check both sys.argv (command line) and explicit empty args list (tests)
+    if (len(sys.argv) == 1 and args is None) or args == []:
         _print_examples()
         return 0
 
