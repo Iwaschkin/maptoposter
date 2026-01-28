@@ -18,7 +18,14 @@ if TYPE_CHECKING:
     pass  # Types imported only for type checking
 
 
-__all__ = ["CacheType", "cache_get", "cache_set", "get_cache_dir"]
+__all__ = [
+    "CacheType",
+    "cache_get",
+    "cache_set",
+    "clear_cache",
+    "get_cache_dir",
+    "get_cache_stats",
+]
 
 
 logger = logging.getLogger(__name__)
@@ -72,24 +79,31 @@ def cache_get(key: str, cache_type: CacheType) -> Any | None:
     try:
         path = _cache_path(key, cache_type)
         if not path.exists():
+            logger.debug("Cache miss", extra={"key": key, "type": cache_type.value})
             return None
 
         if cache_type == CacheType.COORDS:
             data = json.loads(path.read_text(encoding="utf-8"))
             # Convert list back to tuple for coordinates
             if isinstance(data, list) and len(data) == 2:
+                logger.debug("Cache hit", extra={"key": key, "type": cache_type.value})
                 return tuple(data)
+            logger.debug("Cache hit", extra={"key": key, "type": cache_type.value})
             return data
 
         elif cache_type == CacheType.GRAPH:
             import osmnx as ox
 
-            return ox.load_graphml(path)
+            result = ox.load_graphml(path)
+            logger.debug("Cache hit", extra={"key": key, "type": cache_type.value})
+            return result
 
         elif cache_type == CacheType.GEODATA:
             import geopandas as gpd
 
-            return gpd.read_parquet(path)
+            result = gpd.read_parquet(path)
+            logger.debug("Cache hit", extra={"key": key, "type": cache_type.value})
+            return result
 
         return None  # Unknown type
 
@@ -133,8 +147,91 @@ def cache_set(key: str, value: Any, cache_type: CacheType) -> bool:
             logger.warning("Unknown cache type: %s", cache_type)
             return False
 
+        logger.debug("Cache write", extra={"key": key, "type": cache_type.value})
         return True
 
     except Exception as e:
         logger.warning("Cache write error for %s: %s", key, e)
         return False
+
+
+def get_cache_stats() -> dict[str, Any]:
+    """Get statistics about the cache.
+
+    Returns:
+        Dict with cache statistics including:
+        - total_files: Number of cached files
+        - total_size_mb: Total size in megabytes
+        - by_type: Breakdown by cache type (coords, graph, geodata)
+    """
+    cache_dir = get_cache_dir()
+    stats: dict[str, Any] = {
+        "total_files": 0,
+        "total_size_bytes": 0,
+        "total_size_mb": 0.0,
+        "by_type": {
+            "coords": {"files": 0, "size_bytes": 0},
+            "graph": {"files": 0, "size_bytes": 0},
+            "geodata": {"files": 0, "size_bytes": 0},
+        },
+    }
+
+    if not cache_dir.exists():
+        return stats
+
+    for cache_type in CacheType:
+        ext = _get_extension(cache_type)
+        for path in cache_dir.glob(f"*{ext}"):
+            size = path.stat().st_size
+            stats["total_files"] += 1
+            stats["total_size_bytes"] += size
+            stats["by_type"][cache_type.value]["files"] += 1
+            stats["by_type"][cache_type.value]["size_bytes"] += size
+
+    stats["total_size_mb"] = round(stats["total_size_bytes"] / (1024 * 1024), 2)
+    for cache_type in CacheType:
+        bytes_val = stats["by_type"][cache_type.value]["size_bytes"]
+        stats["by_type"][cache_type.value]["size_mb"] = round(bytes_val / (1024 * 1024), 2)
+
+    return stats
+
+
+def clear_cache(cache_type: CacheType | None = None) -> int:
+    """Clear the cache.
+
+    Args:
+        cache_type: Optional type to clear. If None, clears all cache files.
+
+    Returns:
+        Number of files deleted.
+    """
+    cache_dir = get_cache_dir()
+    deleted = 0
+
+    if not cache_dir.exists():
+        return 0
+
+    if cache_type is not None:
+        # Clear specific type
+        ext = _get_extension(cache_type)
+        for path in cache_dir.glob(f"*{ext}"):
+            try:
+                path.unlink()
+                deleted += 1
+                logger.debug("Deleted cache file: %s", path)
+            except Exception as e:
+                logger.warning("Failed to delete %s: %s", path, e)
+    else:
+        # Clear all types
+        for ct in CacheType:
+            ext = _get_extension(ct)
+            for path in cache_dir.glob(f"*{ext}"):
+                try:
+                    path.unlink()
+                    deleted += 1
+                    logger.debug("Deleted cache file: %s", path)
+                except Exception as e:
+                    logger.warning("Failed to delete %s: %s", path, e)
+
+    logger.info("Cleared %d cache files", deleted)
+    return deleted

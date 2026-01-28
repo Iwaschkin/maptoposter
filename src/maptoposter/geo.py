@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Mapping
@@ -60,10 +62,10 @@ def get_coordinates(city: str, country: str) -> tuple[float, float]:
         location = geolocator.geocode(f"{city}, {country}")
     except (ConnectionError, Timeout) as e:
         logger.error("Network error during geocoding: %s", e)
-        raise ValueError(f"Network error during geocoding for {city}, {country}: {e}") from e
+        raise ValueError(f"Network error during geocoding for {city}, {country}.") from e
     except Exception as e:
         logger.error("Geocoding failed: %s", e)
-        raise ValueError(f"Geocoding failed for {city}, {country}: {e}") from e
+        raise ValueError(f"Geocoding failed for {city}, {country}.") from e
 
     if location:
         addr = getattr(location, "address", None)
@@ -118,8 +120,7 @@ def fetch_graph(point: tuple[float, float], dist: float) -> MultiDiGraph | None:
         return graph
     except (ConnectionError, Timeout) as e:
         logger.error("Network error fetching street network: %s", e)
-        print(f"Network error fetching street network: {e}")
-        print("Check your internet connection and try again.")
+        print("Network error fetching street network. Check your connection and try again.")
         return None
     except HTTPError as e:
         if hasattr(e, "response") and e.response is not None and e.response.status_code == 429:
@@ -127,7 +128,7 @@ def fetch_graph(point: tuple[float, float], dist: float) -> MultiDiGraph | None:
             print("Rate limited by OSM API. Please wait and try again.")
         else:
             logger.error("HTTP error from OSM API: %s", e)
-            print(f"HTTP error from OSM API: {e}")
+            print("HTTP error from OSM API. Please try again later.")
         return None
     except Exception as e:
         # Check for osmnx InsufficientResponseError
@@ -136,7 +137,7 @@ def fetch_graph(point: tuple[float, float], dist: float) -> MultiDiGraph | None:
             print("No street data available for this location.")
         else:
             logger.error("Unexpected error fetching OSM graph: %s", e, exc_info=True)
-            print(f"OSMnx error while fetching graph: {e}")
+            print("OSMnx error while fetching graph. Please try again later.")
         return None
 
 
@@ -158,8 +159,10 @@ def fetch_features(
         A GeoDataFrame of features, or None on failure.
     """
     lat, lon = point
-    tag_str = "_".join(tags.keys())
-    cache_key = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
+    # Create a deterministic hash of the tags to ensure cache invalidation when tags change
+    tags_json = json.dumps(dict(tags), sort_keys=True)
+    tags_hash = hashlib.md5(tags_json.encode(), usedforsecurity=False).hexdigest()[:12]
+    cache_key = f"{name}_{lat}_{lon}_{dist}_{tags_hash}"
     cached = cache_get(cache_key, CacheType.GEODATA)
     if cached is not None:
         print(f"✓ Using cached {name}")
@@ -175,7 +178,7 @@ def fetch_features(
         return data
     except (ConnectionError, Timeout) as e:
         logger.error("Network error fetching %s: %s", name, e)
-        print(f"Network error fetching {name}: {e}")
+        print(f"Network error fetching {name}. Check your connection and try again.")
         return None
     except HTTPError as e:
         if hasattr(e, "response") and e.response is not None and e.response.status_code == 429:
@@ -183,7 +186,7 @@ def fetch_features(
             print(f"Rate limited by OSM API while fetching {name}.")
         else:
             logger.error("HTTP error fetching %s: %s", name, e)
-            print(f"HTTP error fetching {name}: {e}")
+            print(f"HTTP error fetching {name}. Please try again later.")
         return None
     except Exception as e:
         # Check for osmnx InsufficientResponseError
@@ -192,7 +195,7 @@ def fetch_features(
             print(f"No {name} data available for this location.")
         else:
             logger.error("Unexpected error fetching %s: %s", name, e, exc_info=True)
-            print(f"OSMnx error while fetching {name}: {e}")
+            print(f"OSMnx error while fetching {name}. Please try again later.")
         return None
 
 

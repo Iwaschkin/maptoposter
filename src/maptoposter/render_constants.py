@@ -1,0 +1,49 @@
+"""Shared render constants."""
+
+from __future__ import annotations
+
+
+__all__ = [
+    "ATTRIBUTION_X_POS",
+    "ATTRIBUTION_Y_POS",
+    "BASE_FONT_ATTR",
+    "BASE_FONT_COORDS",
+    "BASE_FONT_MAIN",
+    "BASE_FONT_SUB",
+    "CITY_NAME_Y_POS",
+    "COORDS_Y_POS",
+    "COUNTRY_LABEL_Y_POS",
+    "DIVIDER_Y_POS",
+    "GRADIENT_HEIGHT_FRACTION",
+    "ROAD_WIDTH_DEFAULT",
+    "ROAD_WIDTH_MOTORWAY",
+    "ROAD_WIDTH_PRIMARY",
+    "ROAD_WIDTH_SECONDARY",
+    "ROAD_WIDTH_TERTIARY",
+    "TEXT_CENTER_X",
+]
+
+# Typography positioning constants
+TEXT_CENTER_X = 0.5
+CITY_NAME_Y_POS = 0.14
+COUNTRY_LABEL_Y_POS = 0.10
+COORDS_Y_POS = 0.07
+DIVIDER_Y_POS = 0.125
+ATTRIBUTION_X_POS = 0.98
+ATTRIBUTION_Y_POS = 0.02
+
+# Gradient constants
+GRADIENT_HEIGHT_FRACTION = 0.25
+
+# Road width constants by highway type
+ROAD_WIDTH_MOTORWAY = 1.2
+ROAD_WIDTH_PRIMARY = 1.0
+ROAD_WIDTH_SECONDARY = 0.8
+ROAD_WIDTH_TERTIARY = 0.6
+ROAD_WIDTH_DEFAULT = 0.4
+
+# Base font sizes (at 12 inches width reference)
+BASE_FONT_MAIN = 60
+BASE_FONT_SUB = 22
+BASE_FONT_COORDS = 14
+BASE_FONT_ATTR = 8

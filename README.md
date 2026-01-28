@@ -32,6 +32,9 @@ cd maptoposter
 # Install dependencies and run
 uv sync
 uv run maptoposter --help
+
+# Optional: enable datashader backend
+uv sync --extra render
 ```
 
 ### Using pip
@@ -80,11 +83,19 @@ python -m maptoposter --city <city> --country <country> [options]
 | **OPTIONAL:** `--name` | | Override display name (city display on poster) | |
 | **OPTIONAL:** `--country-label` | | Override display country (country display on poster) | |
 | **OPTIONAL:** `--theme` | `-t` | Theme name | feature_based |
+| **OPTIONAL:** `--preset` | | Style preset (overrides theme) | |
+| **OPTIONAL:** `--style-pack` | | JSON style pack file (overrides theme) | |
 | **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 29000 |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
+| **OPTIONAL:** `--list-presets` | | List all available presets | |
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 |
+| **OPTIONAL:** `--render-backend` | | Rendering backend (`matplotlib`, `datashader`) | matplotlib |
+| **OPTIONAL:** `--batch` | | Text file with city,country pairs for batch processing | |
+| **OPTIONAL:** `--workers` | | Number of parallel workers for batch mode | 4 |
+| **OPTIONAL:** `--cache-stats` | | Show cache statistics | |
+| **OPTIONAL:** `--clear-cache` | | Clear all cached data | |
 
 ### Resolution Guide (300 DPI)
 
@@ -133,6 +144,31 @@ uv run maptoposter --list-themes
 
 # Generate posters for every theme
 uv run maptoposter -c "Tokyo" -C "Japan" --all-themes
+
+# List available presets
+uv run maptoposter --list-presets
+
+# Use a preset (theme + styling bundle)
+uv run maptoposter -c "Paris" -C "France" --preset noir -d 12000
+
+# Use a custom style pack
+uv run maptoposter -c "Berlin" -C "Germany" --style-pack styles/industrial.json
+
+# Enable datashader backend (optional dependency)
+uv run maptoposter -c "Tokyo" -C "Japan" --render-backend datashader -d 18000
+
+# Batch processing: generate posters for multiple cities
+echo "Paris, France" > cities.txt
+echo "Tokyo, Japan" >> cities.txt
+echo "New York, USA" >> cities.txt
+uv run maptoposter --batch cities.txt -t noir -d 10000
+
+# Batch with multiple workers
+uv run maptoposter --batch cities.txt --workers 8 -t noir
+
+# Cache management
+uv run maptoposter --cache-stats          # View cache statistics
+uv run maptoposter --clear-cache          # Clear all cached data
 ```
 
 ### Distance Guide
@@ -167,12 +203,27 @@ uv run maptoposter -c "Tokyo" -C "Japan" --all-themes
 | `copper_patina` | Oxidized copper aesthetic |
 | `monochrome_blue` | Single blue color family |
 
+## Presets
+
+Presets bundle a theme with style defaults (road casing, glow, typography).
+
+| Preset | Theme |
+|--------|-------|
+| `noir` | `noir` |
+| `blueprint` | `blueprint` |
+| `neon_cyberpunk` | `neon_cyberpunk` |
+| `japanese_ink` | `japanese_ink` |
+| `warm_beige` | `warm_beige` |
+
 ## Output
 
 Posters are saved to `posters/` directory with format:
 ```
 {city}_{theme}_{YYYYMMDD_HHMMSS}.png
 ```
+
+Raster post-processing effects (grain, vignette, paper texture, color grading)
+are only applied to PNG output. SVG/PDF output remains vector-clean.
 
 ## Adding Custom Themes
 
@@ -195,6 +246,26 @@ Create a JSON file in `themes/` directory:
   "road_default": "#3A3A3A"
 }
 ```
+
+## Style Packs
+
+Style packs are JSON files that map directly to renderer styling fields.
+They can optionally include a `theme_name` to select the theme.
+
+```json
+{
+  "theme_name": "noir",
+  "road_glow_strength": 0.4,
+  "typography_tracking": 1,
+  "grain_strength": 0.15,
+  "vignette_strength": 0.2,
+  "color_grading_strength": 0.1
+}
+```
+
+See [docs/style-pack.schema.json](docs/style-pack.schema.json) for the full schema reference.
+
+Example style packs are available in [examples/style-packs/](examples/style-packs/).
 
 ## Project Structure
 
@@ -245,7 +316,7 @@ Quick reference for contributors who want to extend or modify the package.
 | `cli.py` | Command-line interface | `main()`, `cli()`, `create_parser()` |
 | `config.py` | Configuration & themes | `PosterConfig`, `load_theme()`, `get_available_themes()` |
 | `geo.py` | Geographic data | `get_coordinates()`, `fetch_graph()`, `fetch_features()` |
-| `render.py` | Map rendering | `PosterRenderer`, `create_poster()` |
+| `render.py` | Map rendering | `PosterRenderer`, `StyleConfig`, `create_poster()` |
 | `cache.py` | Data caching | `cache_get()`, `cache_set()` |
 | `fonts.py` | Font management | `FontSet`, `load_fonts()` |
 
@@ -254,7 +325,7 @@ Quick reference for contributors who want to extend or modify the package.
 ```
 z=11  Text labels (city, country, coords)
 z=10  Gradient fades (top & bottom)
-z=3   Roads (via ox.plot_graph)
+z=3+  Roads (per-class casing + core)
 z=2   Parks (green polygons)
 z=1   Water (blue polygons)
 z=0   Background color
@@ -264,7 +335,7 @@ z=0   Background color
 
 **New map layer (e.g., railways):**
 
-In `render.py`, modify the `PosterRenderer.render()` method:
+In `render.py`, modify `PosterRenderer.build_layers()`:
 
 ```python
 # After parks fetch:
@@ -274,11 +345,16 @@ railways = fetch_features(
     name='railways',
 )
 
-# Plot before roads:
+# Add before roads:
 if railways is not None and not railways.empty:
-    railways_lines = railways[railways.geometry.type.isin(['LineString', 'MultiLineString'])]
-    if not railways_lines.empty:
-        railways_lines.plot(ax=ax, color=self.theme['railway'], linewidth=0.5, zorder=2.5)
+  railways_lines = railways[railways.geometry.type.isin(['LineString', 'MultiLineString'])]
+  if not railways_lines.empty:
+    layers.append(RenderLayer(
+      name="railways",
+      zorder=ZOrder.PARKS + 1,
+      gdf=railways_lines,
+      style={"color": self.theme["railway"], "linewidth": 0.5},
+    ))
 ```
 
 **New theme property:**

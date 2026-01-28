@@ -1,0 +1,24 @@
+{
+    "theme_name": "british_rail",
+    "road_glow_strength": 0.0,
+    "typography_tracking": 2,
+    "grain_strength": 0.08,
+    "vignette_strength": 0.0,
+    "texture_strength": 0.05,
+    "color_grading_strength": 0.12,
+    "gradient_strength": 0.25,
+    "road_core_widths": {
+        "motorway": 1.4,
+        "primary": 1.1,
+        "secondary": 0.8,
+        "tertiary": 0.6,
+        "default": 0.4
+    },
+    "road_casing_widths": {
+        "motorway": 1.8,
+        "primary": 1.4,
+        "secondary": 1.0,
+        "tertiary": 0.0,
+        "default": 0.0
+    }
+}

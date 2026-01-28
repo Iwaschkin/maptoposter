@@ -1,0 +1,24 @@
+{
+    "theme_name": "midnight_blue",
+    "road_glow_strength": 0.3,
+    "typography_tracking": 3,
+    "grain_strength": 0.05,
+    "vignette_strength": 0.2,
+    "texture_strength": 0.03,
+    "color_grading_strength": 0.15,
+    "gradient_strength": 0.35,
+    "road_core_widths": {
+        "motorway": 1.2,
+        "primary": 1.0,
+        "secondary": 0.7,
+        "tertiary": 0.5,
+        "default": 0.35
+    },
+    "road_casing_widths": {
+        "motorway": 1.6,
+        "primary": 1.3,
+        "secondary": 0.9,
+        "tertiary": 0.0,
+        "default": 0.0
+    }
+}

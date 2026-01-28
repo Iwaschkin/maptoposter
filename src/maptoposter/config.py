@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 
 __all__ = [
@@ -21,6 +21,9 @@ __all__ = [
     "get_themes_dir",
     "load_theme",
 ]
+
+if TYPE_CHECKING:
+    from .styles import StyleConfig
 
 
 class ThemeValidationError(ValueError):
@@ -38,6 +41,7 @@ REQUIRED_THEME_KEYS = frozenset(
         "gradient_color",
         "water",
         "parks",
+        "railway",
         "road_motorway",
         "road_primary",
         "road_secondary",
@@ -235,9 +239,14 @@ class PosterConfig:
     country_label: str | None = None
     name_label: str | None = None
     theme: dict[str, str] = field(default_factory=dict)
+    style_config: StyleConfig | None = None
+    render_backend: str = "matplotlib"
 
     def __post_init__(self) -> None:
         """Load theme data after initialization."""
+        if self.style_config and self.style_config.theme_name:
+            self.theme_name = self.style_config.theme_name
+
         if not self.theme:
             self.theme = load_theme(self.theme_name)
 

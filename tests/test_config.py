@@ -152,6 +152,7 @@ class TestThemeValidation:
         assert "road_motorway" in REQUIRED_THEME_KEYS
         assert "water" in REQUIRED_THEME_KEYS
         assert "parks" in REQUIRED_THEME_KEYS
+        assert "railway" in REQUIRED_THEME_KEYS
 
     def test_theme_validation_error_exists(self) -> None:
         """Test ThemeValidationError can be raised."""

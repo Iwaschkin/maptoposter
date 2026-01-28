@@ -1,0 +1,8 @@
+{
+    "theme_name": "neon_cyberpunk",
+    "road_glow_strength": 0.8,
+    "typography_tracking": 3,
+    "color_grading_strength": 0.25,
+    "vignette_strength": 0.15,
+    "gradient_strength": 0.35
+}

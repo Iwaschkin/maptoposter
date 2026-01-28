@@ -1,0 +1,16 @@
+{
+    "name": "British Rail",
+    "description": "Mid-century British Railway poster aesthetic - classic transport design",
+    "bg": "#FAF5E8",
+    "text": "#1E3D59",
+    "gradient_color": "#FAF5E8",
+    "water": "#8AAFC4",
+    "parks": "#B8C9A3",
+    "railway": "#CE1126",
+    "road_motorway": "#1E3D59",
+    "road_primary": "#2E5077",
+    "road_secondary": "#4A7196",
+    "road_tertiary": "#7A9AB5",
+    "road_residential": "#A0B8C8",
+    "road_default": "#4A7196"
+}

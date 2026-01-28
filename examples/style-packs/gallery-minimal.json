@@ -1,0 +1,23 @@
+{
+    "theme_name": "noir",
+    "road_glow_strength": 0.0,
+    "typography_tracking": 4,
+    "grain_strength": 0.0,
+    "vignette_strength": 0.0,
+    "color_grading_strength": 0.0,
+    "gradient_strength": 0.4,
+    "road_core_widths": {
+        "motorway": 0.6,
+        "primary": 0.5,
+        "secondary": 0.4,
+        "tertiary": 0.3,
+        "default": 0.25
+    },
+    "road_casing_widths": {
+        "motorway": 0.0,
+        "primary": 0.0,
+        "secondary": 0.0,
+        "tertiary": 0.0,
+        "default": 0.0
+    }
+}

@@ -1,0 +1,120 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://maptoposter.dev/style-pack.schema.json",
+    "title": "MapToPoster Style Pack",
+    "description": "Schema for MapToPoster style pack JSON files",
+    "type": "object",
+    "properties": {
+        "theme_name": {
+            "type": "string",
+            "description": "Name of the base theme to use (e.g., 'noir', 'blueprint')"
+        },
+        "typography_tracking": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Character spacing for city name text (0-10, default: 2)"
+        },
+        "road_glow_strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Glow effect strength for major roads (0-1, default: 0)"
+        },
+        "grain_strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Film grain overlay strength (0-1, default: 0)"
+        },
+        "vignette_strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Vignette (edge darkening) strength (0-1, default: 0)"
+        },
+        "texture_strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Paper texture overlay strength (0-1, default: 0)"
+        },
+        "color_grading_strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Color/contrast enhancement strength (0-1, default: 0)"
+        },
+        "gradient_strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Edge fade gradient strength (0-1, default: 0.3)"
+        },
+        "road_core_widths": {
+            "type": "object",
+            "description": "Line widths for road core (inner) layer by road class",
+            "properties": {
+                "motorway": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "primary": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "secondary": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "tertiary": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "default": {
+                    "type": "number",
+                    "minimum": 0
+                }
+            }
+        },
+        "road_casing_widths": {
+            "type": "object",
+            "description": "Line widths for road casing (outer/outline) layer by road class",
+            "properties": {
+                "motorway": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "primary": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "secondary": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "tertiary": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "default": {
+                    "type": "number",
+                    "minimum": 0
+                }
+            }
+        },
+        "enable_layer_cache": {
+            "type": "boolean",
+            "description": "Enable caching of rendered layers for faster re-renders"
+        },
+        "paper_texture_path": {
+            "type": "string",
+            "description": "Path to paper texture image for texture overlay"
+        },
+        "seed": {
+            "type": "integer",
+            "description": "Random seed for reproducible grain effects"
+        }
+    },
+    "additionalProperties": false
+}

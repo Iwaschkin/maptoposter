@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
 from unittest.mock import MagicMock
 
+import geopandas as gpd
 import pytest
+from shapely.geometry import LineString
 
 from maptoposter.config import load_theme
-from maptoposter.render import (
+from maptoposter.render import PosterRenderer, ZOrder, get_backend
+from maptoposter.render_constants import (
     BASE_FONT_ATTR,
     BASE_FONT_COORDS,
     BASE_FONT_MAIN,
@@ -18,9 +22,8 @@ from maptoposter.render import (
     ROAD_WIDTH_PRIMARY,
     ROAD_WIDTH_SECONDARY,
     ROAD_WIDTH_TERTIARY,
-    PosterRenderer,
-    ZOrder,
 )
+from maptoposter.styles import StyleConfig
 
 
 class TestZOrderConstants:
@@ -28,18 +31,22 @@ class TestZOrderConstants:
 
     def test_zorder_layering(self) -> None:
         """Test z-order values are in correct order."""
-        assert ZOrder.WATER < ZOrder.PARKS
+        assert ZOrder.WATER < ZOrder.WATERWAYS
+        assert ZOrder.WATERWAYS < ZOrder.PARKS
         assert ZOrder.PARKS < ZOrder.ROADS
-        assert ZOrder.ROADS < ZOrder.GRADIENT
+        assert ZOrder.ROADS < ZOrder.RAILWAYS
+        assert ZOrder.RAILWAYS < ZOrder.GRADIENT
         assert ZOrder.GRADIENT < ZOrder.TEXT
 
     def test_zorder_values(self) -> None:
         """Test specific z-order values."""
         assert ZOrder.WATER == 1
-        assert ZOrder.PARKS == 2
-        assert ZOrder.ROADS == 3
+        assert ZOrder.WATERWAYS == 2
+        assert ZOrder.PARKS == 3
+        assert ZOrder.ROADS == 4
+        assert ZOrder.RAILWAYS == 8
         assert ZOrder.GRADIENT == 10
-        assert ZOrder.TEXT == 11
+        assert ZOrder.TEXT == 100  # Text always topmost
 
 
 class TestRoadWidthConstants:
@@ -260,3 +267,143 @@ class TestPosterRendererInit:
         renderer = PosterRenderer(config)
 
         assert renderer.fonts is not None
+
+
+def test_build_layers_creates_casing_and_core(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that build_layers creates both casing and core layers for roads."""
+    config = MagicMock()
+    config.theme = load_theme("noir")
+    config.city = "Test City"
+    config.country = "Test Country"
+    config.name_label = None
+    config.country_label = None
+    config.style_config = StyleConfig(road_glow_strength=0.4)
+    config.render_backend = "matplotlib"
+    config.output_format = "png"
+    config.theme_name = "noir"
+
+    renderer = PosterRenderer(config)
+
+    class DummyGraph:
+        graph: ClassVar[dict[str, str]] = {"crs": "EPSG:4326"}
+
+    edges_gdf = gpd.GeoDataFrame(
+        {
+            "highway": ["motorway", "residential"],
+            "geometry": [LineString([(0, 0), (1, 1)]), LineString([(1, 0), (2, 1)])],
+        },
+        crs="EPSG:4326",
+    )
+
+    monkeypatch.setattr("maptoposter.render.ox.project_graph", lambda _graph: DummyGraph())
+    monkeypatch.setattr(
+        "maptoposter.render.ox.graph_to_gdfs",
+        lambda *_args, **_kwargs: edges_gdf,
+    )
+    monkeypatch.setattr(
+        "maptoposter.render.get_crop_limits",
+        lambda *_args, **_kwargs: ((0.0, 1.0), (0.0, 1.0)),
+    )
+
+    layers, _, _ = renderer.build_layers(
+        graph=MagicMock(),
+        water=None,
+        parks=None,
+        railways=None,
+        point=(0.0, 0.0),
+        fig=MagicMock(),
+        compensated_dist=1000.0,
+    )
+
+    layer_names = {layer.name for layer in layers}
+    assert "roads_motorway_casing" in layer_names
+    assert "roads_motorway_core" in layer_names
+    assert "roads_residential_casing" in layer_names
+    assert "roads_residential_core" in layer_names
+
+    motorway_core = next(layer for layer in layers if layer.name == "roads_motorway_core")
+    assert motorway_core.style["glow"] > 0
+
+
+def test_get_backend_falls_back_to_matplotlib() -> None:
+    """Test that get_backend falls back to matplotlib for unknown backends."""
+    backend = get_backend("unknown")
+    assert backend.name == "matplotlib"
+
+
+class TestTypography:
+    """Tests for typography-related methods."""
+
+    @pytest.fixture
+    def renderer(self) -> PosterRenderer:
+        """Create a PosterRenderer with default style."""
+        config = MagicMock()
+        config.theme = load_theme("noir")
+        config.city = "Test City"
+        config.country = "Test Country"
+        config.name_label = None
+        config.country_label = None
+        return PosterRenderer(config)
+
+    def test_get_tracking_returns_default_for_short_names(self, renderer: PosterRenderer) -> None:
+        """Short city names should use the style default tracking."""
+        # Default typography_tracking is 2
+        assert renderer._get_tracking("Paris") == renderer.style.typography_tracking
+        assert renderer._get_tracking("Tokyo") == renderer.style.typography_tracking
+
+    def test_get_tracking_reduces_for_medium_names(self, renderer: PosterRenderer) -> None:
+        """Medium-length names (11-17 chars) should reduce tracking."""
+        assert renderer._get_tracking("Philadelphia") == 1  # 12 chars
+        assert renderer._get_tracking("San Francisco") == 1  # 13 chars
+
+    def test_get_tracking_zero_for_very_long_names(self, renderer: PosterRenderer) -> None:
+        """Very long names (18+ chars) should have zero tracking."""
+        assert renderer._get_tracking("Rio de Janeiro Brazil") == 0  # 21 chars
+        assert renderer._get_tracking("Llanfairpwllgwyngyll") == 0  # 20 chars
+
+    def test_split_city_name_single_word_unchanged(self, renderer: PosterRenderer) -> None:
+        """Single-word names should not be split."""
+        result = renderer._split_city_name("Tokyo")
+        assert result == "TOKYO"
+        assert "\n" not in result
+
+    def test_split_city_name_short_two_words_unchanged(self, renderer: PosterRenderer) -> None:
+        """Short two-word names (<=14 chars) stay on one line."""
+        result = renderer._split_city_name("New York")
+        assert result == "NEW YORK"
+        assert "\n" not in result
+
+    def test_split_city_name_long_splits_balanced(self, renderer: PosterRenderer) -> None:
+        """Long multi-word names should split into balanced lines."""
+        result = renderer._split_city_name("San Francisco California")
+        assert "\n" in result
+        lines = result.split("\n")
+        assert len(lines) == 2
+        # Should be uppercase
+        assert result == result.upper()
+
+    def test_split_city_name_returns_uppercase(self, renderer: PosterRenderer) -> None:
+        """All split results should be uppercase."""
+        assert renderer._split_city_name("paris").isupper()
+        assert renderer._split_city_name("los angeles").isupper()
+
+    def test_apply_tracking_single_line(self, renderer: PosterRenderer) -> None:
+        """Tracking adds spaces between characters on single line."""
+        result = renderer._apply_tracking("ABC", 2)
+        assert result == "A  B  C"
+
+    def test_apply_tracking_multi_line(self, renderer: PosterRenderer) -> None:
+        """Tracking applies to each line independently."""
+        result = renderer._apply_tracking("AB\nCD", 1)
+        assert result == "A B\nC D"
+
+    def test_apply_tracking_zero_no_spaces(self, renderer: PosterRenderer) -> None:
+        """Zero tracking should not add any spaces."""
+        result = renderer._apply_tracking("ABC", 0)
+        assert result == "ABC"
+
+    def test_apply_tracking_preserves_existing_spaces(self, renderer: PosterRenderer) -> None:
+        """Tracking treats spaces as characters too."""
+        result = renderer._apply_tracking("A B", 1)
+        # Each character including space gets tracking applied
+        assert result == "A   B"

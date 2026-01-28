@@ -1,0 +1,24 @@
+{
+    "theme_name": "japanese_ink",
+    "road_glow_strength": 0.0,
+    "typography_tracking": 3,
+    "grain_strength": 0.1,
+    "vignette_strength": 0.0,
+    "texture_strength": 0.15,
+    "color_grading_strength": 0.08,
+    "gradient_strength": 0.2,
+    "road_core_widths": {
+        "motorway": 0.7,
+        "primary": 0.55,
+        "secondary": 0.45,
+        "tertiary": 0.35,
+        "default": 0.25
+    },
+    "road_casing_widths": {
+        "motorway": 0.0,
+        "primary": 0.0,
+        "secondary": 0.0,
+        "tertiary": 0.0,
+        "default": 0.0
+    }
+}
