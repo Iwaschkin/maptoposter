@@ -34,10 +34,9 @@ from .render_constants import (
 )
 from .styles import StyleConfig
 
-
 # Increase PIL's decompression bomb limit for large posters
-# Default is ~89 million pixels; we need more for large print sizes (e.g., 40"x40" @ 300 DPI)
-Image.MAX_IMAGE_PIXELS = 300_000_000  # ~300 megapixels
+# Default is ~89 million pixels; we need more for large print sizes (e.g., 90"x60" @ 300 DPI)
+Image.MAX_IMAGE_PIXELS = 500_000_000  # ~500 megapixels
 
 
 if TYPE_CHECKING:
@@ -248,7 +247,9 @@ class DatashaderBackend:
         for layer in casing_layers:
             if layer.gdf is None or layer.gdf.empty:
                 continue
-            self._render_layer(ax, canvas, layer, tf, theme, px_per_point, quality_scale)
+            self._render_layer(
+                ax, canvas, layer, tf, theme, px_per_point, quality_scale
+            )
 
         # Render core layers with optional glow
         for layer in core_layers:
@@ -256,8 +257,12 @@ class DatashaderBackend:
                 continue
             glow_strength = layer.style.get("glow", 0.0)
             if glow_strength > 0:
-                self._render_glow(ax, canvas, layer, tf, glow_strength, px_per_point, quality_scale)
-            self._render_layer(ax, canvas, layer, tf, theme, px_per_point, quality_scale)
+                self._render_glow(
+                    ax, canvas, layer, tf, glow_strength, px_per_point, quality_scale
+                )
+            self._render_layer(
+                ax, canvas, layer, tf, theme, px_per_point, quality_scale
+            )
 
         return True
 
@@ -333,7 +338,9 @@ class DatashaderBackend:
         # Glow is rendered as a wider, semi-transparent version of the line
         # Use larger line_width for the glow effect
         core_width_px = max(0.5, base_linewidth * px_per_point * quality_scale * 0.8)
-        glow_width_px = core_width_px * (2.0 + glow_strength * 3.0)  # 2x to 5x core width
+        glow_width_px = core_width_px * (
+            2.0 + glow_strength * 3.0
+        )  # 2x to 5x core width
 
         # Render glow with native antialiased line_width
         agg = canvas.line(layer.gdf, geometry="geometry", line_width=glow_width_px)
@@ -385,7 +392,9 @@ class PosterRenderer:
         self.theme = config.theme
         self.fonts = load_fonts()
         style_config = getattr(config, "style_config", None)
-        self.style = style_config if isinstance(style_config, StyleConfig) else StyleConfig()
+        self.style = (
+            style_config if isinstance(style_config, StyleConfig) else StyleConfig()
+        )
 
     def create_gradient_fade(
         self,
@@ -486,7 +495,11 @@ class PosterRenderer:
 
         core_width = self.style.road_core_widths.get(road_class, ROAD_WIDTH_DEFAULT)
         casing_width = self.style.road_casing_widths.get(road_class, core_width)
-        glow = self.style.road_glow_strength if road_class in {"motorway", "primary"} else 0.0
+        glow = (
+            self.style.road_glow_strength
+            if road_class in {"motorway", "primary"}
+            else 0.0
+        )
 
         return RoadStyle(
             road_class=road_class,
@@ -519,8 +532,16 @@ class PosterRenderer:
         ax: Axes,
         point: tuple[float, float],
         scale_factor: float,
+        aspect_ratio: float = 1.0,
     ) -> None:
-        """Add text elements to the poster."""
+        """Add text elements to the poster.
+
+        Args:
+            ax: The matplotlib axes.
+            point: The (lat, lon) coordinates.
+            scale_factor: Font scaling factor based on width.
+            aspect_ratio: Width/height ratio for position compensation.
+        """
         # Use name_label if provided, otherwise use city (CR-0003 fix)
         display_name = self.config.name_label or self.config.city
         tracking_value = self._get_tracking(display_name)
@@ -533,19 +554,41 @@ class PosterRenderer:
 
         if city_char_count > 10:
             length_factor = 10 / city_char_count
-            adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
+            adjusted_font_size = max(
+                base_adjusted_main * length_factor, 10 * scale_factor
+            )
         else:
             adjusted_font_size = base_adjusted_main
 
         font_main = self.fonts.get_properties("bold", adjusted_font_size)
         font_sub = self.fonts.get_properties("light", BASE_FONT_SUB * scale_factor)
-        font_coords = self.fonts.get_properties("regular", BASE_FONT_COORDS * scale_factor)
+        font_coords = self.fonts.get_properties(
+            "regular", BASE_FONT_COORDS * scale_factor
+        )
         font_attr = self.fonts.get_properties("light", BASE_FONT_ATTR)
+
+        # Compensate Y positions for aspect ratio
+        # When aspect_ratio > 1 (wide poster), Y positions need to increase
+        # to maintain consistent physical spacing since height is shorter.
+        # The compensation factor ensures text doesn't crowd together on wide posters.
+        # Reference aspect ratio is 1.0 (square); positions are designed for this.
+        y_compensation = max(1.0, aspect_ratio**0.5)  # Square root for gentler scaling
+
+        city_y = self.style.city_name_y_pos * y_compensation
+        divider_y = self.style.divider_y_pos * y_compensation
+        country_y = self.style.country_label_y_pos * y_compensation
+        coords_y = self.style.coords_y_pos * y_compensation
+
+        # Clamp to valid range (0.0 - 0.5) to prevent text going too high
+        city_y = min(city_y, 0.35)
+        divider_y = min(divider_y, 0.30)
+        country_y = min(country_y, 0.25)
+        coords_y = min(coords_y, 0.20)
 
         # City name
         city_artist = ax.text(
             self.style.text_center_x,
-            self.style.city_name_y_pos,
+            city_y,
             spaced_city,
             transform=ax.transAxes,
             color=self.theme["text"],
@@ -569,7 +612,7 @@ class PosterRenderer:
         country_text = self.config.country_label or self.config.country
         ax.text(
             self.style.text_center_x,
-            self.style.country_label_y_pos,
+            country_y,
             country_text.upper(),
             transform=ax.transAxes,
             color=self.theme["text"],
@@ -587,7 +630,7 @@ class PosterRenderer:
 
         ax.text(
             self.style.text_center_x,
-            self.style.coords_y_pos,
+            coords_y,
             coords,
             transform=ax.transAxes,
             color=self.theme["text"],
@@ -600,7 +643,7 @@ class PosterRenderer:
         # Divider line
         ax.plot(
             [0.4, 0.6],
-            [self.style.divider_y_pos, self.style.divider_y_pos],
+            [divider_y, divider_y],
             transform=ax.transAxes,
             color=self.theme["text"],
             linewidth=1 * scale_factor,
@@ -677,7 +720,11 @@ class PosterRenderer:
         """Prepare layers without rendering."""
         layers: list[RenderLayer] = []
         cache_key = self._format_cache_key(point, compensated_dist)
-        cached = self._get_cached_layers(cache_key) if self.style.enable_layer_cache else None
+        cached = (
+            self._get_cached_layers(cache_key)
+            if self.style.enable_layer_cache
+            else None
+        )
 
         if cached:
             g_proj = cached["graph"]
@@ -697,7 +744,9 @@ class PosterRenderer:
 
             if water is not None and not water.empty:
                 # Extract polygon water bodies (lakes, ponds, wide rivers)
-                water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
+                water_polys = water[
+                    water.geometry.type.isin(["Polygon", "MultiPolygon"])
+                ]
                 if not water_polys.empty:
                     try:
                         water_polys = ox.projection.project_gdf(water_polys)
@@ -712,7 +761,9 @@ class PosterRenderer:
                             logger.warning("Could not project water data: %s", e2)
 
                 # Extract linear waterways (rivers, streams, canals)
-                waterways = water[water.geometry.type.isin(["LineString", "MultiLineString"])]
+                waterways = water[
+                    water.geometry.type.isin(["LineString", "MultiLineString"])
+                ]
                 if not waterways.empty:
                     try:
                         waterways = ox.projection.project_gdf(waterways)
@@ -727,7 +778,9 @@ class PosterRenderer:
                             logger.warning("Could not project waterways data: %s", e2)
 
             if parks is not None and not parks.empty:
-                parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
+                parks_polys = parks[
+                    parks.geometry.type.isin(["Polygon", "MultiPolygon"])
+                ]
                 if not parks_polys.empty:
                     try:
                         parks_polys = ox.projection.project_gdf(parks_polys)
@@ -746,7 +799,9 @@ class PosterRenderer:
                         try:
                             water_union = water_polys.union_all()
                             parks_polys = parks_polys.copy()
-                            parks_polys["geometry"] = parks_polys.geometry.difference(water_union)
+                            parks_polys["geometry"] = parks_polys.geometry.difference(
+                                water_union
+                            )
                             # Remove any empty geometries after subtraction
                             parks_polys = parks_polys[~parks_polys.geometry.is_empty]
                         except Exception as e:
@@ -938,7 +993,9 @@ class PosterRenderer:
         # Render railway lines
         if railways_lines is not None and not railways_lines.empty:
             # Get railway color from theme with fallback
-            railway_color = self.theme.get("railway", self.theme.get("road_secondary", "#555555"))
+            railway_color = self.theme.get(
+                "railway", self.theme.get("road_secondary", "#555555")
+            )
             layers.append(
                 RenderLayer(
                     name="railways",
@@ -954,7 +1011,9 @@ class PosterRenderer:
 
         return layers, crop_xlim, crop_ylim
 
-    def _format_cache_key(self, point: tuple[float, float], compensated_dist: float) -> str:
+    def _format_cache_key(
+        self, point: tuple[float, float], compensated_dist: float
+    ) -> str:
         lat = round(point[0], 5)
         lon = round(point[1], 5)
         dist = round(compensated_dist, 1)
@@ -998,7 +1057,9 @@ class PosterRenderer:
                             [
                                 patheffects.Stroke(
                                     linewidth=base_width + glow,
-                                    foreground=layer.style.get("color", self.theme["road_default"]),
+                                    foreground=layer.style.get(
+                                        "color", self.theme["road_default"]
+                                    ),
                                     alpha=0.4,
                                 ),
                                 patheffects.Normal(),
@@ -1041,15 +1102,23 @@ class PosterRenderer:
         ax: Axes,
         point: tuple[float, float],
         scale_factor: float,
+        aspect_ratio: float = 1.0,
     ) -> None:
-        """Apply post-processing effects after rendering layers."""
+        """Apply post-processing effects after rendering layers.
+
+        Args:
+            ax: The matplotlib axes.
+            point: The (lat, lon) coordinates.
+            scale_factor: Font scaling factor based on width.
+            aspect_ratio: Width/height ratio for typography position compensation.
+        """
         self.create_gradient_fade(
             ax, self.theme["gradient_color"], location="bottom", zorder=ZOrder.GRADIENT
         )
         self.create_gradient_fade(
             ax, self.theme["gradient_color"], location="top", zorder=ZOrder.GRADIENT
         )
-        self._add_typography(ax, point, scale_factor)
+        self._add_typography(ax, point, scale_factor, aspect_ratio)
 
     def _get_cached_layers(self, cache_key: str) -> dict[str, Any] | None:
         with LAYER_CACHE_LOCK:
@@ -1202,7 +1271,8 @@ class PosterRenderer:
         self.render_layers(ax, layers, crop_xlim, crop_ylim)
 
         scale_factor = width / 12.0
-        self.post_process(ax, point, scale_factor)
+        aspect_ratio = width / height
+        self.post_process(ax, point, scale_factor, aspect_ratio)
 
         # Save
         logger.info("Saving to %s...", output_file)

@@ -1,0 +1,17 @@
+{
+    "name": "British Rail Modernized",
+    "description": "Mid-century British railway poster aesthetic refined for modern map clarity",
+    "bg": "#F6F1E4",
+    "text": "#16324F",
+    "gradient_color": "#F6F1E4",
+    "water": "#7FA6C2",
+    "parks": "#AFC2A0",
+    "railway": "#C4141C",
+    "road_motorway": "#1C3553",
+    "road_primary": "#2F567A",
+    "road_secondary": "#4F7396",
+    "road_tertiary": "#7F9FB8",
+    "road_residential": "#A9BECF",
+    "road_path": "#D4DEE6",
+    "road_default": "#4F7396"
+}
