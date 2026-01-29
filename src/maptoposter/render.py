@@ -77,6 +77,7 @@ class ZOrder:
     WATER = 1
     WATERWAYS = 2  # Rivers/streams rendered as lines above water polygons
     PARKS = 3
+    PATHS = 3.5  # Footpaths rendered below roads
     ROADS = 4
     RAILWAYS = 8  # Railways rendered above roads
     GRADIENT = 10
@@ -97,6 +98,14 @@ HIGHWAY_CLASS_MAP: dict[str, str] = {
     "residential": "residential",
     "living_street": "residential",
     "unclassified": "residential",
+    # Paths and footways - rendered below roads
+    "footway": "path",
+    "path": "path",
+    "bridleway": "path",
+    "cycleway": "path",
+    "pedestrian": "path",
+    "track": "path",
+    "steps": "path",
 }
 
 
@@ -105,7 +114,7 @@ class RenderLayer:
     """Prepared render layer without drawing."""
 
     name: str
-    zorder: int
+    zorder: int | float
     gdf: Any | None = None
     graph: MultiDiGraph | None = None
     style: dict[str, Any] = field(default_factory=dict)
@@ -867,6 +876,7 @@ class PosterRenderer:
         )
 
         class_order = [
+            "path",  # Footpaths rendered first (below all roads)
             "default",
             "residential",
             "tertiary",
@@ -882,6 +892,23 @@ class PosterRenderer:
             style = self.classify_edge(class_edges.iloc[0].get("highway"))
             casing_zorder = ZOrder.ROADS + index * 2
             core_zorder = ZOrder.ROADS + index * 2 + 1
+
+            # Paths use dotted lines, no casing
+            if road_class == "path":
+                layers.append(
+                    RenderLayer(
+                        name=f"roads_{road_class}_core",
+                        zorder=ZOrder.PATHS,
+                        gdf=class_edges,
+                        style={
+                            "color": self.theme.get("road_path", style.core_color),
+                            "linewidth": style.core_width,
+                            "linestyle": (0, (1, 2)),  # Dotted pattern for footpaths
+                            "glow": 0.0,
+                        },
+                    )
+                )
+                continue
 
             layers.append(
                 RenderLayer(
@@ -954,12 +981,15 @@ class PosterRenderer:
         for layer in sorted(layers, key=lambda item: item.zorder):
             if layer.gdf is not None:
                 if "linewidth" in layer.style:
-                    artist = layer.gdf.plot(
-                        ax=ax,
-                        color=layer.style.get("color", self.theme["road_default"]),
-                        linewidth=layer.style.get("linewidth", ROAD_WIDTH_DEFAULT),
-                        zorder=layer.zorder,
-                    )
+                    plot_kwargs: dict[str, Any] = {
+                        "ax": ax,
+                        "color": layer.style.get("color", self.theme["road_default"]),
+                        "linewidth": layer.style.get("linewidth", ROAD_WIDTH_DEFAULT),
+                        "zorder": layer.zorder,
+                    }
+                    if "linestyle" in layer.style:
+                        plot_kwargs["linestyle"] = layer.style["linestyle"]
+                    artist = layer.gdf.plot(**plot_kwargs)
                     glow = layer.style.get("glow", 0.0)
                     if glow > 0 and artist.collections:
                         collection = artist.collections[-1]

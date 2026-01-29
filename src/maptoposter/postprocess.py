@@ -13,22 +13,34 @@ class RasterStyle(Protocol):
     """Protocol for raster post-processing style values."""
 
     @property
-    def grain_strength(self) -> float: ...
+    def grain_strength(self) -> float:
+        """Film grain effect strength (0-1)."""
+        ...
 
     @property
-    def vignette_strength(self) -> float: ...
+    def vignette_strength(self) -> float:
+        """Vignette darkening effect strength (0-1)."""
+        ...
 
     @property
-    def texture_strength(self) -> float: ...
+    def texture_strength(self) -> float:
+        """Paper texture overlay strength (0-1)."""
+        ...
 
     @property
-    def color_grading_strength(self) -> float: ...
+    def color_grading_strength(self) -> float:
+        """Color grading/toning effect strength (0-1)."""
+        ...
 
     @property
-    def paper_texture_path(self) -> str | None: ...
+    def paper_texture_path(self) -> str | None:
+        """Path to custom paper texture image, or None."""
+        ...
 
     @property
-    def seed(self) -> int | None: ...
+    def seed(self) -> int | None:
+        """Random seed for reproducible grain effects, or None."""
+        ...
 
 
 @dataclass(frozen=True)

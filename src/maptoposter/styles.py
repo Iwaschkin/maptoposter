@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
+from pathlib import Path
 
 from .render_constants import (
     ATTRIBUTION_X_POS,
@@ -16,7 +17,9 @@ from .render_constants import (
     GRADIENT_HEIGHT_FRACTION,
     ROAD_WIDTH_DEFAULT,
     ROAD_WIDTH_MOTORWAY,
+    ROAD_WIDTH_PATH,
     ROAD_WIDTH_PRIMARY,
+    ROAD_WIDTH_RESIDENTIAL,
     ROAD_WIDTH_SECONDARY,
     ROAD_WIDTH_TERTIARY,
     TEXT_CENTER_X,
@@ -43,6 +46,8 @@ class StyleConfig:
             "primary": ROAD_WIDTH_PRIMARY,
             "secondary": ROAD_WIDTH_SECONDARY,
             "tertiary": ROAD_WIDTH_TERTIARY,
+            "residential": ROAD_WIDTH_RESIDENTIAL,
+            "path": ROAD_WIDTH_PATH,
             "default": ROAD_WIDTH_DEFAULT,
         }
     )
@@ -52,6 +57,8 @@ class StyleConfig:
             "primary": 1.5,
             "secondary": 1.2,
             "tertiary": 0.9,
+            "residential": 0.6,
+            "path": 0.0,  # No casing for paths
             "default": 0.6,
         }
     )
@@ -172,7 +179,7 @@ def get_style_preset(preset_name: str) -> StyleConfig:
 
 def load_style_pack(path: str) -> StyleConfig:
     """Load a StyleConfig from a JSON style pack file."""
-    with open(path, encoding="utf-8") as handle:
+    with Path(path).open(encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
         raise ValueError("Style pack must be a JSON object.")

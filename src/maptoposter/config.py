@@ -47,6 +47,7 @@ REQUIRED_THEME_KEYS = frozenset(
         "road_secondary",
         "road_tertiary",
         "road_residential",
+        "road_path",
         "road_default",
     }
 )
@@ -162,7 +163,9 @@ def _get_default_theme() -> dict[str, str]:
         "road_secondary": "#2A2A2A",
         "road_tertiary": "#3A3A3A",
         "road_residential": "#4A4A4A",
+        "road_path": "#808080",
         "road_default": "#3A3A3A",
+        "railway": "#505050",
     }
 
 

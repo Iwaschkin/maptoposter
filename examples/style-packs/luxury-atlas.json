@@ -12,6 +12,8 @@
         "primary": 1.0,
         "secondary": 0.7,
         "tertiary": 0.5,
+        "residential": 0.35,
+        "path": 0.2,
         "default": 0.35
     },
     "road_casing_widths": {
@@ -19,6 +21,8 @@
         "primary": 1.3,
         "secondary": 0.9,
         "tertiary": 0.0,
+        "residential": 0.0,
+        "path": 0.0,
         "default": 0.0
     }
 }

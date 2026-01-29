@@ -1,6 +1,6 @@
 {
     "theme_name": "british_rail",
-    "road_glow_strength": 0.0,
+    "road_glow_strength": 0.1,
     "typography_tracking": 2,
     "grain_strength": 0.08,
     "vignette_strength": 0.0,
@@ -8,17 +8,21 @@
     "color_grading_strength": 0.12,
     "gradient_strength": 0.25,
     "road_core_widths": {
-        "motorway": 1.4,
-        "primary": 1.1,
-        "secondary": 0.8,
-        "tertiary": 0.6,
-        "default": 0.4
+        "motorway": 2.2,
+        "primary": 1.9,
+        "secondary": 1.7,
+        "tertiary": 1.4,
+        "residential": 1.2,
+        "path": 0.6,
+        "default": 0.8
     },
     "road_casing_widths": {
         "motorway": 1.8,
         "primary": 1.4,
         "secondary": 1.0,
         "tertiary": 0.0,
+        "residential": 0.0,
+        "path": 0.0,
         "default": 0.0
     }
 }

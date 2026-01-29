@@ -1,0 +1,17 @@
+{
+    "name": "LCARS",
+    "description": "Star Trek LCARS computer interface aesthetic - bold colors on black",
+    "bg": "#000000",
+    "text": "#FF9900",
+    "gradient_color": "#000000",
+    "water": "#9999FF",
+    "parks": "#CC99CC",
+    "railway": "#FF0000",
+    "road_motorway": "#FF9900",
+    "road_primary": "#CC6699",
+    "road_secondary": "#9999FF",
+    "road_tertiary": "#CC99CC",
+    "road_residential": "#FFCC99",
+    "road_path": "#666699",
+    "road_default": "#CC99CC"
+}

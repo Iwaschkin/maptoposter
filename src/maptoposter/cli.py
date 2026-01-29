@@ -161,6 +161,13 @@ Examples:
         help="Override country text displayed on poster",
     )
     parser.add_argument(
+        "--name",
+        "-n",
+        dest="name_label",
+        type=str,
+        help="Override city name displayed on poster",
+    )
+    parser.add_argument(
         "--theme",
         "-t",
         type=str,

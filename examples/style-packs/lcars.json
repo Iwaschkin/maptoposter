@@ -1,19 +1,20 @@
 {
-    "theme_name": "noir",
-    "road_glow_strength": 0.0,
+    "theme_name": "lcars",
+    "road_glow_strength": 0.3,
     "typography_tracking": 4,
     "grain_strength": 0.0,
     "vignette_strength": 0.0,
+    "texture_strength": 0.0,
     "color_grading_strength": 0.0,
-    "gradient_strength": 0.4,
+    "gradient_strength": 0.2,
     "road_core_widths": {
-        "motorway": 0.6,
-        "primary": 0.5,
-        "secondary": 0.4,
-        "tertiary": 0.3,
-        "residential": 0.25,
-        "path": 0.15,
-        "default": 0.25
+        "motorway": 1.4,
+        "primary": 1.1,
+        "secondary": 0.9,
+        "tertiary": 0.7,
+        "residential": 0.5,
+        "path": 0.25,
+        "default": 0.5
     },
     "road_casing_widths": {
         "motorway": 0.0,

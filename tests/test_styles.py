@@ -74,6 +74,7 @@ def test_presets_have_meaningful_values() -> None:
 
 
 def test_load_style_pack_valid(tmp_path: Path) -> None:
+    """Test loading a valid style pack from JSON."""
     style_pack = {
         "theme_name": "noir",
         "road_glow_strength": 0.3,
@@ -87,6 +88,7 @@ def test_load_style_pack_valid(tmp_path: Path) -> None:
 
 
 def test_load_style_pack_rejects_unknown_keys(tmp_path: Path) -> None:
+    """Test that unknown keys in style pack raise ValueError."""
     style_pack = {
         "theme_name": "noir",
         "unknown_key": 123,
