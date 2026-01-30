@@ -2,38 +2,20 @@
 
 Generate beautiful, minimalist map posters for any city in the world.
 
-<img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250">
-<img src="posters/dubai_midnight_blue_20260118_140807.png" width="250">
-
-## Examples
-
-
-| Country      | City           | Theme           | Poster |
-|:------------:|:--------------:|:---------------:|:------:|
-| USA          | San Francisco  | sunset          | <img src="posters/san_francisco_sunset_20260118_144726.png" width="250"> |
-| Spain        | Barcelona      | warm_beige      | <img src="posters/barcelona_warm_beige_20260118_140048.png" width="250"> |
-| Italy        | Venice         | blueprint       | <img src="posters/venice_blueprint_20260118_140505.png" width="250"> |
-| Japan        | Tokyo          | japanese_ink    | <img src="posters/tokyo_japanese_ink_20260118_142446.png" width="250"> |
-| India        | Mumbai         | contrast_zones  | <img src="posters/mumbai_contrast_zones_20260118_145843.png" width="250"> |
-| Morocco      | Marrakech      | terracotta      | <img src="posters/marrakech_terracotta_20260118_143253.png" width="250"> |
-| Singapore    | Singapore      | neon_cyberpunk  | <img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250"> |
-| Australia    | Melbourne      | forest          | <img src="posters/melbourne_forest_20260118_153446.png" width="250"> |
-| UAE          | Dubai          | midnight_blue   | <img src="posters/dubai_midnight_blue_20260118_140807.png" width="250"> |
-
 ## Installation
 
 ### Using UV (Recommended)
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/maptoposter.git
+git clone https://github.com/Iwaschkin/maptoposter.git
 cd maptoposter
 
 # Install dependencies and run
 uv sync
 uv run maptoposter --help
 
-# Optional: enable datashader backend
+# Optional: enable datashader backend for better performance on large datasets
 uv sync --extra render
 ```
 
@@ -47,18 +29,18 @@ pip install maptoposter
 
 ```bash
 # Clone and install with dev dependencies
-git clone https://github.com/your-username/maptoposter.git
+git clone https://github.com/Iwaschkin/maptoposter.git
 cd maptoposter
 uv sync --all-extras
 
-# Run tests
+# Run tests (212 tests)
 uv run pytest
 
-# Run linter
-uv run ruff check src/
+# Run pre-commit hooks (includes ruff, mypy, etc.)
+uv run pre-commit run --all-files
 
-# Run type checker
-uv run mypy src/
+# Install pre-commit hooks for automatic checks
+uv run pre-commit install
 ```
 
 ## Usage
@@ -157,13 +139,19 @@ uv run maptoposter -c "Berlin" -C "Germany" --style-pack styles/industrial.json
 # Enable datashader backend (optional dependency)
 uv run maptoposter -c "Tokyo" -C "Japan" --render-backend datashader -d 18000
 
-# Batch processing: generate posters for multiple cities
+# Batch processing: simple format (legacy)
 echo "Paris, France" > cities.txt
 echo "Tokyo, Japan" >> cities.txt
 echo "New York, USA" >> cities.txt
 uv run maptoposter --batch cities.txt -t noir -d 10000
 
-# Batch with multiple workers
+# Batch processing: CSV with headers for custom labels
+echo "city,country,display_name,country_label" > cities.csv
+echo "Paris,France,Paname,République Française" >> cities.csv
+echo "NYC,USA,New York City,United States" >> cities.csv
+uv run maptoposter --batch cities.csv -t noir
+
+# Batch with multiple workers (parallel processing)
 uv run maptoposter --batch cities.txt --workers 8 -t noir
 
 # Cache management
@@ -181,7 +169,7 @@ uv run maptoposter --clear-cache          # Clear all cached data
 
 ## Themes
 
-17 themes available in `themes/` directory:
+20 built-in themes available in `src/maptoposter/data/themes/`:
 
 | Theme | Style |
 |-------|-------|
@@ -202,18 +190,23 @@ uv run maptoposter --clear-cache          # Clear all cached data
 | `autumn` | Seasonal burnt oranges and reds |
 | `copper_patina` | Oxidized copper aesthetic |
 | `monochrome_blue` | Single blue color family |
+| `british_rail` | British Rail corporate identity inspired |
+| `british_rail_refined` | Refined British Rail aesthetic |
+| `lcars` | Star Trek LCARS interface style |
 
 ## Presets
 
-Presets bundle a theme with style defaults (road casing, glow, typography).
+Presets bundle a theme with style defaults (road casing, glow, typography, post-processing effects).
 
-| Preset | Theme |
-|--------|-------|
-| `noir` | `noir` |
-| `blueprint` | `blueprint` |
-| `neon_cyberpunk` | `neon_cyberpunk` |
-| `japanese_ink` | `japanese_ink` |
-| `warm_beige` | `warm_beige` |
+| Preset | Theme | Description |
+|--------|-------|-------------|
+| `noir` | `noir` | Classic film noir aesthetic with subtle grain and vignette |
+| `blueprint` | `blueprint` | Technical drawing style with no casing or effects |
+| `neon_cyberpunk` | `neon_cyberpunk` | Vibrant neon glow with enhanced color saturation |
+| `japanese_ink` | `japanese_ink` | Calligraphic style with wide tracking and soft vignette |
+| `warm_beige` | `warm_beige` | Vintage warmth with film grain and subtle color grading |
+| `vintage` | `warm_beige` | Classic vintage film look with grain and vignette |
+| `film_noir` | `noir` | High contrast noir with stronger effects |
 
 ## Output
 
@@ -227,7 +220,7 @@ are only applied to PNG output. SVG/PDF output remains vector-clean.
 
 ## Adding Custom Themes
 
-Create a JSON file in `themes/` directory:
+Create a JSON file in `src/maptoposter/data/themes/` directory:
 
 ```json
 {
@@ -238,14 +231,18 @@ Create a JSON file in `themes/` directory:
   "gradient_color": "#FFFFFF",
   "water": "#C0C0C0",
   "parks": "#F0F0F0",
+  "railway": "#505050",
   "road_motorway": "#0A0A0A",
   "road_primary": "#1A1A1A",
   "road_secondary": "#2A2A2A",
   "road_tertiary": "#3A3A3A",
   "road_residential": "#4A4A4A",
+  "road_path": "#808080",
   "road_default": "#3A3A3A"
 }
 ```
+
+All color values must be hex codes. The `railway` and `road_path` keys are required in addition to the standard road types.
 
 ## Style Packs
 
@@ -313,72 +310,104 @@ Quick reference for contributors who want to extend or modify the package.
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `cli.py` | Command-line interface | `main()`, `cli()`, `create_parser()` |
+| `cli.py` | Command-line interface | `main()`, `cli()`, `create_parser()`, `_parse_batch_file()` |
 | `config.py` | Configuration & themes | `PosterConfig`, `load_theme()`, `get_available_themes()` |
-| `geo.py` | Geographic data | `get_coordinates()`, `fetch_graph()`, `fetch_features()` |
-| `render.py` | Map rendering | `PosterRenderer`, `StyleConfig`, `create_poster()` |
-| `cache.py` | Data caching | `cache_get()`, `cache_set()` |
+| `geo.py` | Geographic data | `get_coordinates()`, `fetch_graph()`, `fetch_features()`, custom exceptions |
+| `render.py` | Map rendering | `PosterRenderer`, `LayerCache`, `create_poster()` |
+| `styles.py` | Style presets and packs | `StyleConfig`, `get_style_preset()`, `load_style_pack()` |
+| `postprocess.py` | Raster effects | `apply_raster_effects()`, `PostProcessResult` |
+| `cache.py` | Data caching | `cache_get()`, `cache_set()`, `cache_clear()` |
 | `fonts.py` | Font management | `FontSet`, `load_fonts()` |
+| `render_constants.py` | Typography & sizing | Road widths, z-order, text positioning constants |
 
 ### Rendering Layers (z-order)
 
 ```
-z=11  Text labels (city, country, coords)
+z=100 Text labels (city, country, coords)
 z=10  Gradient fades (top & bottom)
-z=3+  Roads (per-class casing + core)
-z=2   Parks (green polygons)
-z=1   Water (blue polygons)
+z=8   Railways (rail lines)
+z=4   Roads - core layers (by type)
+z=3.5 Paths (footpaths, cycleways - dotted lines)
+z=3   Roads - casing layers (below core)
+z=2.5 Parks (green polygons)
+z=2   Waterways (rivers, streams)
+z=1   Water bodies (lakes, oceans - blue polygons)
 z=0   Background color
 ```
 
+### Error Handling
+
+The package uses custom exceptions for better error handling:
+
+- `GeoError`: Base exception for geographic operations
+- `GeocodingError`: Raised when city/country geocoding fails
+- `OSMFetchError`: Raised when OpenStreetMap data fetching fails
+
+All exceptions include descriptive error messages to help diagnose issues.
+
 ### Adding New Features
 
-**New map layer (e.g., railways):**
+**New map layer (e.g., buildings):**
 
-In `render.py`, modify `PosterRenderer.build_layers()`:
+In `render.py`, modify `PosterRenderer._build_layers()`:
 
 ```python
 # After parks fetch:
-railways = fetch_features(
-    point, compensated_dist,
-    tags={'railway': 'rail'},
-    name='railways',
-)
+try:
+    buildings = fetch_features(
+        point, compensated_dist,
+        tags={'building': True},
+        name='buildings',
+    )
+except OSMFetchError as e:
+    logger.warning(f"Failed to fetch buildings: {e}")
+    buildings = None
 
-# Add before roads:
-if railways is not None and not railways.empty:
-  railways_lines = railways[railways.geometry.type.isin(['LineString', 'MultiLineString'])]
-  if not railways_lines.empty:
-    layers.append(RenderLayer(
-      name="railways",
-      zorder=ZOrder.PARKS + 1,
-      gdf=railways_lines,
-      style={"color": self.theme["railway"], "linewidth": 0.5},
-    ))
+# Add with appropriate z-order:
+if buildings is not None and not buildings.empty:
+    building_polys = buildings[buildings.geometry.type.isin(['Polygon', 'MultiPolygon'])]
+    if not building_polys.empty:
+        layers.append(RenderLayer(
+            name="buildings",
+            zorder=5,  # Above roads, below text
+            gdf=building_polys,
+            style={"facecolor": self.theme.get("building", "#CCCCCC"),
+                   "edgecolor": "none", "alpha": 0.3},
+        ))
 ```
 
 **New theme property:**
-1. Add to theme JSON: `"railway": "#FF0000"`
-2. Use in code: `self.theme['railway']`
+1. Add to all theme JSON files: `"building": "#CCCCCC"`
+2. Add to `REQUIRED_THEME_KEYS` in `config.py` if mandatory
 3. Add fallback in `config.py` `_get_default_theme()`
+4. Use in code: `self.theme["building"]` or `self.theme.get("building", "#default")`
 
 ### Development Commands
 
 ```bash
-# Run tests with coverage
-uv run pytest --cov=maptoposter
+# Run all pre-commit hooks (recommended)
+uv run pre-commit run --all-files
 
-# Format code
+# Run tests (212 tests)
+uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=maptoposter --cov-report=html
+
+# Format code (done automatically by pre-commit)
 uv run ruff format src/
 
 # Lint and fix
 uv run ruff check src/ --fix
 
-# Type check
+# Type check (strict mode)
 uv run mypy src/
 
 # Build package
 uv build
+
+# Install pre-commit hooks for automatic checking
+uv run pre-commit install
 ```
 
 ### Environment Variables
