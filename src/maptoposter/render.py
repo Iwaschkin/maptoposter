@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
 from matplotlib import patheffects
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from PIL import Image
 from pyproj.exceptions import CRSError
@@ -23,16 +22,21 @@ from tqdm import tqdm
 
 from .config import PosterConfig
 from .fonts import load_fonts
-from .geo import fetch_features, fetch_graph, get_crop_limits
+from .geo import OSMFetchError, fetch_features, fetch_graph, get_crop_limits
 from .postprocess import apply_raster_effects, needs_raster_postprocessing
 from .render_constants import (
     BASE_FONT_ATTR,
     BASE_FONT_COORDS,
     BASE_FONT_MAIN,
     BASE_FONT_SUB,
+    CITY_NAME_Y_MAX,
+    COORDS_Y_MAX,
+    COUNTRY_LABEL_Y_MAX,
+    DIVIDER_Y_MAX,
     ROAD_WIDTH_DEFAULT,
 )
 from .styles import StyleConfig
+
 
 # Increase PIL's decompression bomb limit for large posters
 # Default is ~89 million pixels; we need more for large print sizes (e.g., 90"x60" @ 300 DPI)
@@ -42,27 +46,187 @@ Image.MAX_IMAGE_PIXELS = 500_000_000  # ~500 megapixels
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from geopandas import GeoDataFrame
+    from matplotlib.axes import Axes
     from networkx import MultiDiGraph
+
+# Datashader types - datashader is an optional dependency
+# Using Any since we can't import types from an optional package
+DatashaderCanvas = Any
+DatashaderTransferFunctions = Any
+
+# OSM highway tag values can be str, list[str], or None
+OSMHighwayValue = str | list[str] | None
 
 __all__ = [
     "DatashaderBackend",
+    "LayerCache",
     "MatplotlibBackend",
     "PosterRenderer",
     "RenderBackend",
     "RenderLayer",
     "RoadStyle",
     "StyleConfig",
+    "clear_layer_cache",
     "create_poster",
 ]
 
 logger = logging.getLogger(__name__)
 
-LAYER_CACHE_MAX = 4
-LAYER_CACHE_TTL_SECONDS = 3600
-LAYER_CACHE: dict[str, dict[str, Any]] = {}
-LAYER_CACHE_ORDER: list[str] = []
-LAYER_CACHE_LOCK = threading.Lock()
-LAYER_CACHE_STATS = {"hits": 0, "misses": 0, "evictions": 0, "expired": 0}
+
+class LayerCache:
+    """Thread-safe LRU cache for rendered layers (singleton)."""
+
+    _instance: LayerCache | None = None
+
+    # Configuration constants
+    MAX_ENTRIES = 4
+    MAX_BYTES = 500 * 1024 * 1024  # 500MB memory limit
+    TTL_SECONDS = 3600  # 1 hour
+
+    def __new__(cls) -> LayerCache:
+        """Create or return the singleton LayerCache instance."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._init_cache()
+        return cls._instance
+
+    def _init_cache(self) -> None:
+        """Initialize cache state."""
+        self._cache: dict[str, dict[str, Any]] = {}
+        self._order: list[str] = []
+        self._lock = threading.Lock()
+        self._stats = {
+            "hits": 0,
+            "misses": 0,
+            "evictions": 0,
+            "expired": 0,
+            "memory_evictions": 0,
+        }
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset singleton instance (for testing)."""
+        if cls._instance is not None:
+            cls._instance._init_cache()
+
+    def _estimate_entry_size(self, payload: dict[str, Any]) -> int:
+        """Estimate memory usage of a cache entry in bytes.
+
+        Args:
+            payload: The cache payload dictionary.
+
+        Returns:
+            Estimated size in bytes.
+        """
+        total = 0
+        for value in payload.values():
+            if hasattr(value, "memory_usage"):
+                # GeoDataFrame has memory_usage method
+                try:
+                    total += int(value.memory_usage(deep=True).sum())
+                except (TypeError, ValueError, AttributeError):
+                    total += 10 * 1024 * 1024  # Assume 10MB if can't measure
+            elif hasattr(value, "__sizeof__"):
+                total += value.__sizeof__()
+        return total
+
+    def _get_total_size(self) -> int:
+        """Get total estimated memory usage of layer cache.
+
+        Returns:
+            Total estimated size in bytes.
+        """
+        total = 0
+        for payload in self._cache.values():
+            total += self._estimate_entry_size(payload)
+        return total
+
+    def get(self, cache_key: str) -> dict[str, Any] | None:
+        """Look up layers in cache.
+
+        Args:
+            cache_key: The cache key to look up.
+
+        Returns:
+            Cached payload dict if found and not expired, None otherwise.
+        """
+        with self._lock:
+            cached = self._cache.get(cache_key)
+            if cached is None:
+                self._stats["misses"] += 1
+                return None
+            cached_at = cached.get("cached_at")
+            if cached_at and time.time() - cached_at > self.TTL_SECONDS:
+                self._stats["expired"] += 1
+                self._cache.pop(cache_key, None)
+                if cache_key in self._order:
+                    self._order.remove(cache_key)
+                return None
+            self._stats["hits"] += 1
+            return cached
+
+    def set(self, cache_key: str, payload: dict[str, Any]) -> None:
+        """Store layers in cache with memory limits.
+
+        Enforces both count-based (MAX_ENTRIES) and memory-based
+        (MAX_BYTES) limits to prevent memory exhaustion.
+
+        Args:
+            cache_key: The cache key to store under.
+            payload: The layer data to cache.
+        """
+        with self._lock:
+            if cache_key in self._cache:
+                return
+
+            # Evict oldest entries if count limit exceeded
+            while len(self._order) >= self.MAX_ENTRIES:
+                oldest = self._order.pop(0)
+                self._cache.pop(oldest, None)
+                self._stats["evictions"] += 1
+
+            # Evict oldest entries if memory limit exceeded
+            current_size = self._get_total_size()
+            while current_size > self.MAX_BYTES and self._order:
+                oldest = self._order.pop(0)
+                self._cache.pop(oldest, None)
+                self._stats["memory_evictions"] += 1
+                current_size = self._get_total_size()
+
+            payload["cached_at"] = time.time()
+            self._cache[cache_key] = payload
+            self._order.append(cache_key)
+
+    def clear(self) -> int:
+        """Clear all cache entries.
+
+        Returns:
+            Number of entries cleared.
+        """
+        with self._lock:
+            count = len(self._cache)
+            self._cache.clear()
+            self._order.clear()
+            return count
+
+    @property
+    def stats(self) -> dict[str, int]:
+        """Get cache statistics."""
+        return self._stats.copy()
+
+
+# Module-level singleton instance
+_layer_cache = LayerCache()
+
+
+def clear_layer_cache() -> int:
+    """Clear the in-memory layer cache.
+
+    Returns:
+        Number of entries cleared.
+    """
+    return _layer_cache.clear()
 
 
 # =============================================================================
@@ -114,7 +278,7 @@ class RenderLayer:
 
     name: str
     zorder: int | float
-    gdf: Any | None = None
+    gdf: GeoDataFrame | None = None
     graph: MultiDiGraph | None = None
     style: dict[str, Any] = field(default_factory=dict)
 
@@ -154,16 +318,18 @@ class MatplotlibBackend:
 
     def render_roads(
         self,
-        ax: Axes,  # noqa: ARG002
-        layers: list[RenderLayer],  # noqa: ARG002
-        crop_xlim: tuple[float, float],  # noqa: ARG002
-        crop_ylim: tuple[float, float],  # noqa: ARG002
-        theme: dict[str, str],  # noqa: ARG002
+        ax: Axes,
+        layers: list[RenderLayer],
+        crop_xlim: tuple[float, float],
+        crop_ylim: tuple[float, float],
+        theme: dict[str, str],
     ) -> bool:
-        """Render roads using matplotlib (currently defers to standard rendering).
+        """Matplotlib backend defers to standard rendering path.
 
-        This backend returns False to indicate that the standard matplotlib
-        rendering path should be used instead.
+        This method intentionally returns False to indicate that the
+        PosterRenderer should use its built-in matplotlib rendering
+        instead of this backend. Parameters are required by the
+        RenderBackend protocol but unused here.
 
         Args:
             ax: The matplotlib axes (unused, defers to standard rendering).
@@ -175,6 +341,7 @@ class MatplotlibBackend:
         Returns:
             False, indicating standard rendering should be used.
         """
+        del ax, layers, crop_xlim, crop_ylim, theme  # Satisfy linter
         return False
 
 
@@ -211,7 +378,7 @@ class DatashaderBackend:
         try:
             import datashader as ds
             import datashader.transfer_functions as tf
-        except Exception:
+        except ImportError:
             return False
 
         road_layers = [layer for layer in layers if layer.name.startswith("roads_")]
@@ -247,9 +414,7 @@ class DatashaderBackend:
         for layer in casing_layers:
             if layer.gdf is None or layer.gdf.empty:
                 continue
-            self._render_layer(
-                ax, canvas, layer, tf, theme, px_per_point, quality_scale
-            )
+            self._render_layer(ax, canvas, layer, tf, theme, px_per_point, quality_scale)
 
         # Render core layers with optional glow
         for layer in core_layers:
@@ -257,21 +422,17 @@ class DatashaderBackend:
                 continue
             glow_strength = layer.style.get("glow", 0.0)
             if glow_strength > 0:
-                self._render_glow(
-                    ax, canvas, layer, tf, glow_strength, px_per_point, quality_scale
-                )
-            self._render_layer(
-                ax, canvas, layer, tf, theme, px_per_point, quality_scale
-            )
+                self._render_glow(ax, canvas, layer, tf, glow_strength, px_per_point, quality_scale)
+            self._render_layer(ax, canvas, layer, tf, theme, px_per_point, quality_scale)
 
         return True
 
     def _render_layer(
         self,
         ax: Axes,
-        canvas: Any,
+        canvas: DatashaderCanvas,
         layer: RenderLayer,
-        tf: Any,
+        tf: DatashaderTransferFunctions,
         theme: dict[str, str],
         px_per_point: float,
         quality_scale: float,
@@ -311,9 +472,9 @@ class DatashaderBackend:
     def _render_glow(
         self,
         ax: Axes,
-        canvas: Any,
+        canvas: DatashaderCanvas,
         layer: RenderLayer,
-        tf: Any,
+        tf: DatashaderTransferFunctions,
         glow_strength: float,
         px_per_point: float,
         quality_scale: float,
@@ -338,9 +499,7 @@ class DatashaderBackend:
         # Glow is rendered as a wider, semi-transparent version of the line
         # Use larger line_width for the glow effect
         core_width_px = max(0.5, base_linewidth * px_per_point * quality_scale * 0.8)
-        glow_width_px = core_width_px * (
-            2.0 + glow_strength * 3.0
-        )  # 2x to 5x core width
+        glow_width_px = core_width_px * (2.0 + glow_strength * 3.0)  # 2x to 5x core width
 
         # Render glow with native antialiased line_width
         agg = canvas.line(layer.gdf, geometry="geometry", line_width=glow_width_px)
@@ -392,9 +551,7 @@ class PosterRenderer:
         self.theme = config.theme
         self.fonts = load_fonts()
         style_config = getattr(config, "style_config", None)
-        self.style = (
-            style_config if isinstance(style_config, StyleConfig) else StyleConfig()
-        )
+        self.style = style_config if isinstance(style_config, StyleConfig) else StyleConfig()
 
     def create_gradient_fade(
         self,
@@ -469,14 +626,25 @@ class PosterRenderer:
 
         return edge_colors
 
-    def _normalize_highway(self, highway: Any) -> str:
+    def _normalize_highway(self, highway: OSMHighwayValue) -> str:
+        """Normalize highway value to a string.
+
+        OSM highway tags can be strings, lists of strings, or None.
+        This method normalizes them to a single string value.
+
+        Args:
+            highway: Raw highway value from OSM edge data.
+
+        Returns:
+            Normalized highway type string.
+        """
         if isinstance(highway, list):
             return highway[0] if highway else "unclassified"
         if highway is None:
             return "unclassified"
         return str(highway)
 
-    def classify_edge(self, highway: Any) -> RoadStyle:
+    def classify_edge(self, highway: OSMHighwayValue) -> RoadStyle:
         """Classify an edge by highway value into a RoadStyle."""
         highway_value = self._normalize_highway(highway)
         road_class = HIGHWAY_CLASS_MAP.get(highway_value, "default")
@@ -495,11 +663,7 @@ class PosterRenderer:
 
         core_width = self.style.road_core_widths.get(road_class, ROAD_WIDTH_DEFAULT)
         casing_width = self.style.road_casing_widths.get(road_class, core_width)
-        glow = (
-            self.style.road_glow_strength
-            if road_class in {"motorway", "primary"}
-            else 0.0
-        )
+        glow = self.style.road_glow_strength if road_class in {"motorway", "primary"} else 0.0
 
         return RoadStyle(
             road_class=road_class,
@@ -554,17 +718,13 @@ class PosterRenderer:
 
         if city_char_count > 10:
             length_factor = 10 / city_char_count
-            adjusted_font_size = max(
-                base_adjusted_main * length_factor, 10 * scale_factor
-            )
+            adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
         else:
             adjusted_font_size = base_adjusted_main
 
         font_main = self.fonts.get_properties("bold", adjusted_font_size)
         font_sub = self.fonts.get_properties("light", BASE_FONT_SUB * scale_factor)
-        font_coords = self.fonts.get_properties(
-            "regular", BASE_FONT_COORDS * scale_factor
-        )
+        font_coords = self.fonts.get_properties("regular", BASE_FONT_COORDS * scale_factor)
         font_attr = self.fonts.get_properties("light", BASE_FONT_ATTR)
 
         # Compensate Y positions for aspect ratio
@@ -579,11 +739,11 @@ class PosterRenderer:
         country_y = self.style.country_label_y_pos * y_compensation
         coords_y = self.style.coords_y_pos * y_compensation
 
-        # Clamp to valid range (0.0 - 0.5) to prevent text going too high
-        city_y = min(city_y, 0.35)
-        divider_y = min(divider_y, 0.30)
-        country_y = min(country_y, 0.25)
-        coords_y = min(coords_y, 0.20)
+        # Clamp to valid range to prevent text going too high (CR-013)
+        city_y = min(city_y, CITY_NAME_Y_MAX)
+        divider_y = min(divider_y, DIVIDER_Y_MAX)
+        country_y = min(country_y, COUNTRY_LABEL_Y_MAX)
+        coords_y = min(coords_y, COORDS_Y_MAX)
 
         # City name
         city_artist = ax.text(
@@ -665,7 +825,24 @@ class PosterRenderer:
         )
 
     def _get_tracking(self, display_name: str) -> int:
-        """Determine character tracking based on display name length."""
+        """Determine character tracking (letter-spacing) based on display name length.
+
+        Tracking is the uniform spacing added between all characters. Longer names
+        get less tracking to prevent overflow, while shorter names get more tracking
+        for visual balance.
+
+        The algorithm uses these thresholds:
+        - 18+ characters: 0 (no tracking)
+        - 14-17 characters: 1 space
+        - 11-13 characters: 1 space
+        - <11 characters: use style's default typography_tracking
+
+        Args:
+            display_name: The city name to calculate tracking for.
+
+        Returns:
+            Number of spaces to insert between each character.
+        """
         length = len(display_name)
         if length >= 18:
             return 0
@@ -676,7 +853,27 @@ class PosterRenderer:
         return self.style.typography_tracking
 
     def _split_city_name(self, display_name: str) -> str:
-        """Split long city names into two balanced lines."""
+        r"""Split long city names into two balanced lines for visual appeal.
+
+        Names are split at word boundaries to create roughly equal line lengths.
+        The algorithm:
+        1. If single word, return uppercase unchanged
+        2. If total character count <= 14, return single line uppercase
+        3. Otherwise, split at the midpoint of total characters, respecting word boundaries
+        4. Move words from right to left until left side is >= half the total length
+
+        Examples:
+            - "Paris" -> "PARIS"
+            - "New York" -> "NEW YORK"
+            - "Los Angeles" -> "LOS\nANGELES"
+            - "Rio de Janeiro" -> "RIO DE\nJANEIRO"
+
+        Args:
+            display_name: The city name to potentially split.
+
+        Returns:
+            Uppercase city name, possibly with newline for two-line display.
+        """
         words = display_name.split()
         if len(words) < 2:
             return display_name.upper()
@@ -699,7 +896,23 @@ class PosterRenderer:
         return f"{left.upper()}\n{right.upper()}"
 
     def _apply_tracking(self, text: str, tracking: int) -> str:
-        """Apply character tracking to single or multi-line text."""
+        r"""Apply character tracking (letter-spacing) to text.
+
+        Inserts 'tracking' number of spaces between each character. For multi-line
+        text, tracking is applied to each line independently.
+
+        Examples:
+            - _apply_tracking("ABC", 2) -> "A  B  C"
+            - _apply_tracking("AB\nCD", 1) -> "A B\nC D"
+            - _apply_tracking("ABC", 0) -> "ABC" (no change)
+
+        Args:
+            text: The text to apply tracking to (may contain newlines).
+            tracking: Number of spaces to insert between each character.
+
+        Returns:
+            Text with tracking applied.
+        """
         spacer = " " * tracking
         if "\n" not in text:
             return spacer.join(list(text))
@@ -707,24 +920,33 @@ class PosterRenderer:
         spaced_lines = [spacer.join(list(line)) for line in lines]
         return "\n".join(spaced_lines)
 
-    def build_layers(  # noqa: PLR0912
+    def build_layers(
         self,
         graph: MultiDiGraph,
-        water: Any,
-        parks: Any,
-        railways: Any,
+        water: GeoDataFrame | None,
+        parks: GeoDataFrame | None,
+        railways: GeoDataFrame | None,
         point: tuple[float, float],
         fig: Figure,
         compensated_dist: float,
     ) -> tuple[list[RenderLayer], tuple[float, float], tuple[float, float]]:
-        """Prepare layers without rendering."""
+        """Prepare layers without rendering.
+
+        Args:
+            graph: The projected street network graph.
+            water: GeoDataFrame of water features, or None.
+            parks: GeoDataFrame of park features, or None.
+            railways: GeoDataFrame of railway features, or None.
+            point: The (lat, lon) center coordinates.
+            fig: The matplotlib figure.
+            compensated_dist: The compensated distance for viewport crop.
+
+        Returns:
+            Tuple of (layers, crop_xlim, crop_ylim).
+        """
         layers: list[RenderLayer] = []
         cache_key = self._format_cache_key(point, compensated_dist)
-        cached = (
-            self._get_cached_layers(cache_key)
-            if self.style.enable_layer_cache
-            else None
-        )
+        cached = self._get_cached_layers(cache_key) if self.style.enable_layer_cache else None
 
         if cached:
             g_proj = cached["graph"]
@@ -744,9 +966,7 @@ class PosterRenderer:
 
             if water is not None and not water.empty:
                 # Extract polygon water bodies (lakes, ponds, wide rivers)
-                water_polys = water[
-                    water.geometry.type.isin(["Polygon", "MultiPolygon"])
-                ]
+                water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
                 if not water_polys.empty:
                     try:
                         water_polys = ox.projection.project_gdf(water_polys)
@@ -761,9 +981,7 @@ class PosterRenderer:
                             logger.warning("Could not project water data: %s", e2)
 
                 # Extract linear waterways (rivers, streams, canals)
-                waterways = water[
-                    water.geometry.type.isin(["LineString", "MultiLineString"])
-                ]
+                waterways = water[water.geometry.type.isin(["LineString", "MultiLineString"])]
                 if not waterways.empty:
                     try:
                         waterways = ox.projection.project_gdf(waterways)
@@ -778,9 +996,7 @@ class PosterRenderer:
                             logger.warning("Could not project waterways data: %s", e2)
 
             if parks is not None and not parks.empty:
-                parks_polys = parks[
-                    parks.geometry.type.isin(["Polygon", "MultiPolygon"])
-                ]
+                parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
                 if not parks_polys.empty:
                     try:
                         parks_polys = ox.projection.project_gdf(parks_polys)
@@ -799,9 +1015,7 @@ class PosterRenderer:
                         try:
                             water_union = water_polys.union_all()
                             parks_polys = parks_polys.copy()
-                            parks_polys["geometry"] = parks_polys.geometry.difference(
-                                water_union
-                            )
+                            parks_polys["geometry"] = parks_polys.geometry.difference(water_union)
                             # Remove any empty geometries after subtraction
                             parks_polys = parks_polys[~parks_polys.geometry.is_empty]
                         except Exception as e:
@@ -993,9 +1207,7 @@ class PosterRenderer:
         # Render railway lines
         if railways_lines is not None and not railways_lines.empty:
             # Get railway color from theme with fallback
-            railway_color = self.theme.get(
-                "railway", self.theme.get("road_secondary", "#555555")
-            )
+            railway_color = self.theme.get("railway", self.theme.get("road_secondary", "#555555"))
             layers.append(
                 RenderLayer(
                     name="railways",
@@ -1011,9 +1223,16 @@ class PosterRenderer:
 
         return layers, crop_xlim, crop_ylim
 
-    def _format_cache_key(
-        self, point: tuple[float, float], compensated_dist: float
-    ) -> str:
+    def _format_cache_key(self, point: tuple[float, float], compensated_dist: float) -> str:
+        """Generate a cache key from location and distance.
+
+        Args:
+            point: The (lat, lon) coordinates.
+            compensated_dist: The compensated distance for viewport.
+
+        Returns:
+            A string cache key in format "lat_lon_dist".
+        """
         lat = round(point[0], 5)
         lon = round(point[1], 5)
         dist = round(compensated_dist, 1)
@@ -1057,9 +1276,7 @@ class PosterRenderer:
                             [
                                 patheffects.Stroke(
                                     linewidth=base_width + glow,
-                                    foreground=layer.style.get(
-                                        "color", self.theme["road_default"]
-                                    ),
+                                    foreground=layer.style.get("color", self.theme["road_default"]),
                                     alpha=0.4,
                                 ),
                                 patheffects.Normal(),
@@ -1089,6 +1306,11 @@ class PosterRenderer:
         ax.set_ylim(crop_ylim)
 
     def _get_backend(self) -> RenderBackend:
+        """Get the configured render backend, with fallback to matplotlib.
+
+        Returns:
+            The render backend instance (matplotlib or datashader).
+        """
         backend = get_backend(self.config.render_backend)
         if backend.name != self.config.render_backend:
             logger.warning(
@@ -1121,32 +1343,26 @@ class PosterRenderer:
         self._add_typography(ax, point, scale_factor, aspect_ratio)
 
     def _get_cached_layers(self, cache_key: str) -> dict[str, Any] | None:
-        with LAYER_CACHE_LOCK:
-            cached = LAYER_CACHE.get(cache_key)
-            if cached is None:
-                LAYER_CACHE_STATS["misses"] += 1
-                return None
-            cached_at = cached.get("cached_at")
-            if cached_at and time.time() - cached_at > LAYER_CACHE_TTL_SECONDS:
-                LAYER_CACHE_STATS["expired"] += 1
-                LAYER_CACHE.pop(cache_key, None)
-                if cache_key in LAYER_CACHE_ORDER:
-                    LAYER_CACHE_ORDER.remove(cache_key)
-                return None
-            LAYER_CACHE_STATS["hits"] += 1
-            return cached
+        """Retrieve cached layers by key.
+
+        Args:
+            cache_key: The cache key to look up.
+
+        Returns:
+            Cached payload dict if found and not expired, None otherwise.
+        """
+        return _layer_cache.get(cache_key)
 
     def _set_cached_layers(self, cache_key: str, payload: dict[str, Any]) -> None:
-        with LAYER_CACHE_LOCK:
-            if cache_key in LAYER_CACHE:
-                return
-            if len(LAYER_CACHE_ORDER) >= LAYER_CACHE_MAX:
-                oldest = LAYER_CACHE_ORDER.pop(0)
-                LAYER_CACHE.pop(oldest, None)
-                LAYER_CACHE_STATS["evictions"] += 1
-            payload["cached_at"] = time.time()
-            LAYER_CACHE[cache_key] = payload
-            LAYER_CACHE_ORDER.append(cache_key)
+        """Store layers in cache with memory limits.
+
+        Enforces both count-based and memory-based limits to prevent memory exhaustion.
+
+        Args:
+            cache_key: The cache key to store under.
+            payload: The layer data to cache.
+        """
+        _layer_cache.set(cache_key, payload)
 
     def render(
         self,
@@ -1188,65 +1404,72 @@ class PosterRenderer:
         ) as pbar:
             pbar.set_description("Downloading street network")
             graph = fetch_graph(point, compensated_dist)
-            if graph is None:
-                raise RuntimeError("Failed to retrieve street network data.")
             pbar.update(1)
 
             pbar.set_description("Downloading water features")
-            water = fetch_features(
-                point,
-                compensated_dist,
-                tags={
-                    # Water bodies (polygons) - natural=water covers lakes, ponds, etc.
-                    "natural": ["water", "bay", "strait", "wetland", "coastline"],
-                    # Specific water body types (water=* tag)
-                    "water": [
-                        "lake",
-                        "pond",
-                        "reservoir",
-                        "basin",
-                        "lagoon",
-                        "oxbow",
-                        "canal",
-                        "river",
-                        "stream",
-                        "moat",
-                        "wastewater",
-                    ],
-                    # Waterways (lines and polygons)
-                    "waterway": [
-                        "river",
-                        "stream",
-                        "canal",
-                        "riverbank",
-                        "dock",
-                        "boatyard",
-                    ],
-                    # Landuse water features
-                    "landuse": ["basin", "reservoir"],
-                    # Place=sea for named seas/oceans
-                    "place": "sea",
-                },
-                name="water",
-            )
+            try:
+                water = fetch_features(
+                    point,
+                    compensated_dist,
+                    tags={
+                        # Water bodies (polygons) - natural=water covers lakes, ponds, etc.
+                        "natural": ["water", "bay", "strait", "wetland", "coastline"],
+                        # Specific water body types (water=* tag)
+                        "water": [
+                            "lake",
+                            "pond",
+                            "reservoir",
+                            "basin",
+                            "lagoon",
+                            "oxbow",
+                            "canal",
+                            "river",
+                            "stream",
+                            "moat",
+                            "wastewater",
+                        ],
+                        # Linear and areal water features
+                        "waterway": [
+                            "river",
+                            "stream",
+                            "canal",
+                            "riverbank",
+                            "dock",
+                            "boatyard",
+                        ],
+                        # Landuse water features
+                        "landuse": ["basin", "reservoir"],
+                        # Place=sea for named seas/oceans
+                        "place": "sea",
+                    },
+                    name="water",
+                )
+            except OSMFetchError:
+                water = None
             pbar.update(1)
 
             pbar.set_description("Downloading parks/green spaces")
-            parks = fetch_features(
-                point,
-                compensated_dist,
-                tags={"leisure": "park", "landuse": "grass"},
-                name="parks",
-            )
+            try:
+                parks = fetch_features(
+                    point,
+                    compensated_dist,
+                    tags={"leisure": "park", "landuse": "grass"},
+                    name="parks",
+                )
+            except OSMFetchError:
+                parks = None
             pbar.update(1)
 
             pbar.set_description("Downloading railway lines")
-            railways = fetch_features(
-                point,
-                compensated_dist,
-                tags={"railway": ["rail", "light_rail", "subway", "tram"]},
-                name="railways",
-            )
+            try:
+                railways = fetch_features(
+                    point,
+                    compensated_dist,
+                    tags={"railway": ["rail", "light_rail", "subway", "tram"]},
+                    name="railways",
+                )
+            except OSMFetchError:
+                railways = None
             pbar.update(1)
 
         logger.info("All data retrieved successfully.")
@@ -1293,8 +1516,14 @@ class PosterRenderer:
                 plt.savefig(buffer, format="png", **save_kwargs)
                 buffer.seek(0)
                 image = Image.open(buffer)
-                image = apply_raster_effects(image, self.style)
-                image.save(output_file, format="PNG")
+                result = apply_raster_effects(image, self.style)
+                if result.effects_applied:
+                    logger.debug(
+                        "Applied post-processing effects: %s (seed=%s)",
+                        ", ".join(result.effects_applied),
+                        result.grain_seed,
+                    )
+                result.image.save(output_file, format="PNG")
             else:
                 plt.savefig(output_file, format=fmt, **save_kwargs)
         finally:

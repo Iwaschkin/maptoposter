@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from maptoposter.cli import _parse_batch_file, cli, create_parser
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestCLI:
@@ -70,7 +74,7 @@ class TestParser:
         assert args.preset is None
         assert args.style_pack is None
         assert args.render_backend == "matplotlib"
-        assert args.distance == 29000
+        assert args.distance == 12000  # Safe default for most cities
         assert args.width == 12.0
         assert args.height == 16.0
         assert args.format == "png"
@@ -156,8 +160,10 @@ class TestBatchProcessing:
 
         cities = _parse_batch_file(str(batch_file))
         assert len(cities) == 2
-        assert cities[0] == ("Paris", "France")
-        assert cities[1] == ("Tokyo", "Japan")
+        assert cities[0]["city"] == "Paris"
+        assert cities[0]["country"] == "France"
+        assert cities[1]["city"] == "Tokyo"
+        assert cities[1]["country"] == "Japan"
 
     def test_parse_batch_file_with_comments(self, tmp_path: Path) -> None:
         """Test parsing a batch file with comments and blank lines."""

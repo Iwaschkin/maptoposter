@@ -6,23 +6,41 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 import osmnx as ox
 from geopy.geocoders import Nominatim
-from requests.exceptions import ConnectionError, HTTPError, Timeout
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, Timeout
 from shapely.geometry import Point
 
 from .cache import CacheType, cache_get, cache_set
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from geopandas import GeoDataFrame
     from matplotlib.figure import Figure
     from networkx import MultiDiGraph
 
+
+class GeoError(Exception):
+    """Base exception for geo module errors."""
+
+
+class GeocodingError(GeoError):
+    """Raised when geocoding fails."""
+
+
+class OSMFetchError(GeoError):
+    """Raised when OSM data fetching fails."""
+
+
 __all__ = [
+    "GeoError",
+    "GeocodingError",
+    "OSMFetchError",
     "fetch_features",
     "fetch_graph",
     "get_coordinates",
@@ -46,34 +64,34 @@ def get_coordinates(city: str, country: str) -> tuple[float, float]:
         A tuple of (latitude, longitude).
 
     Raises:
-        ValueError: If the location cannot be found.
+        GeocodingError: If the location cannot be found or a network error occurs.
     """
     cache_key = f"coords_{city.lower()}_{country.lower()}"
     cached = cache_get(cache_key, CacheType.COORDS)
     if cached is not None:
-        print(f"✓ Using cached coordinates for {city}, {country}")
+        logger.info("Using cached coordinates for %s, %s", city, country)
         return cast("tuple[float, float]", cached)
 
-    print("Looking up coordinates...")
+    logger.info("Looking up coordinates...")
     geolocator = Nominatim(user_agent="maptoposter")
     geolocator.timeout = 10
 
     try:
         location = geolocator.geocode(f"{city}, {country}")
-    except (ConnectionError, Timeout) as e:
+    except (RequestsConnectionError, Timeout) as e:
         logger.error("Network error during geocoding: %s", e)
-        raise ValueError(f"Network error during geocoding for {city}, {country}.") from e
+        raise GeocodingError(f"Network error during geocoding for {city}, {country}.") from e
     except Exception as e:
         logger.error("Geocoding failed: %s", e)
-        raise ValueError(f"Geocoding failed for {city}, {country}.") from e
+        raise GeocodingError(f"Geocoding failed for {city}, {country}.") from e
 
     if location:
         addr = getattr(location, "address", None)
         if addr:
-            print(f"✓ Found: {addr}")
+            logger.info("Found: %s", addr)
         else:
-            print("✓ Found location (address not available)")
-        print(f"✓ Coordinates: {location.latitude}, {location.longitude}")
+            logger.info("Found location (address not available)")
+        logger.info("Coordinates: %s, %s", location.latitude, location.longitude)
 
         coords = (float(location.latitude), float(location.longitude))
 
@@ -84,10 +102,10 @@ def get_coordinates(city: str, country: str) -> tuple[float, float]:
             logger.warning("Failed to cache coordinates for %s", cache_key)
         return coords
 
-    raise ValueError(f"Could not find coordinates for {city}, {country}")
+    raise GeocodingError(f"Could not find coordinates for {city}, {country}")
 
 
-def fetch_graph(point: tuple[float, float], dist: float) -> MultiDiGraph | None:
+def fetch_graph(point: tuple[float, float], dist: float) -> MultiDiGraph:
     """Fetch the street network graph for a location.
 
     Args:
@@ -95,13 +113,16 @@ def fetch_graph(point: tuple[float, float], dist: float) -> MultiDiGraph | None:
         dist: The distance in meters from the point.
 
     Returns:
-        A NetworkX MultiDiGraph of the street network, or None on failure.
+        A NetworkX MultiDiGraph of the street network.
+
+    Raises:
+        OSMFetchError: If the street network cannot be fetched.
     """
     lat, lon = point
     cache_key = f"graph_{lat}_{lon}_{dist}"
     cached = cache_get(cache_key, CacheType.GRAPH)
     if cached is not None:
-        print("✓ Using cached street network")
+        logger.info("Using cached street network")
         return cast("MultiDiGraph", cached)
 
     try:
@@ -118,27 +139,22 @@ def fetch_graph(point: tuple[float, float], dist: float) -> MultiDiGraph | None:
         if not cache_set(cache_key, graph, CacheType.GRAPH):
             logger.warning("Failed to cache graph for %s", cache_key)
         return graph
-    except (ConnectionError, Timeout) as e:
+    except (RequestsConnectionError, Timeout) as e:
         logger.error("Network error fetching street network: %s", e)
-        print("Network error fetching street network. Check your connection and try again.")
-        return None
+        raise OSMFetchError(f"Network error fetching street network: {e}") from e
     except HTTPError as e:
         if hasattr(e, "response") and e.response is not None and e.response.status_code == 429:
             logger.error("Rate limited by OSM API")
-            print("Rate limited by OSM API. Please wait and try again.")
-        else:
-            logger.error("HTTP error from OSM API: %s", e)
-            print("HTTP error from OSM API. Please try again later.")
-        return None
+            raise OSMFetchError("Rate limited by OSM API") from e
+        logger.error("HTTP error from OSM API: %s", e)
+        raise OSMFetchError(f"HTTP error from OSM API: {e}") from e
     except Exception as e:
         # Check for osmnx InsufficientResponseError
         if "InsufficientResponseError" in type(e).__name__ or "EmptyOverpassResponse" in str(e):
             logger.warning("No street data available for this location")
-            print("No street data available for this location.")
-        else:
-            logger.error("Unexpected error fetching OSM graph: %s", e, exc_info=True)
-            print("OSMnx error while fetching graph. Please try again later.")
-        return None
+            raise OSMFetchError("No street data available for this location") from e
+        logger.exception("Unexpected error fetching OSM graph: %s", e)
+        raise OSMFetchError(f"Unexpected error fetching OSM graph: {e}") from e
 
 
 def fetch_features(
@@ -146,7 +162,7 @@ def fetch_features(
     dist: float,
     tags: Mapping[str, bool | str | list[str]],
     name: str,
-) -> GeoDataFrame | None:
+) -> GeoDataFrame:
     """Fetch geographic features (water, parks, etc.) for a location.
 
     Args:
@@ -156,7 +172,10 @@ def fetch_features(
         name: A descriptive name for caching.
 
     Returns:
-        A GeoDataFrame of features, or None on failure.
+        A GeoDataFrame of features.
+
+    Raises:
+        OSMFetchError: If the features cannot be fetched.
     """
     lat, lon = point
     # Create a deterministic hash of the tags to ensure cache invalidation when tags change
@@ -165,7 +184,7 @@ def fetch_features(
     cache_key = f"{name}_{lat}_{lon}_{dist}_{tags_hash}"
     cached = cache_get(cache_key, CacheType.GEODATA)
     if cached is not None:
-        print(f"✓ Using cached {name}")
+        logger.info("Using cached %s", name)
         return cast("GeoDataFrame", cached)
 
     try:
@@ -176,27 +195,22 @@ def fetch_features(
         if not cache_set(cache_key, data, CacheType.GEODATA):
             logger.warning("Failed to cache %s for %s", name, cache_key)
         return data
-    except (ConnectionError, Timeout) as e:
+    except (RequestsConnectionError, Timeout) as e:
         logger.error("Network error fetching %s: %s", name, e)
-        print(f"Network error fetching {name}. Check your connection and try again.")
-        return None
+        raise OSMFetchError(f"Network error fetching {name}: {e}") from e
     except HTTPError as e:
         if hasattr(e, "response") and e.response is not None and e.response.status_code == 429:
             logger.error("Rate limited by OSM API while fetching %s", name)
-            print(f"Rate limited by OSM API while fetching {name}.")
-        else:
-            logger.error("HTTP error fetching %s: %s", name, e)
-            print(f"HTTP error fetching {name}. Please try again later.")
-        return None
+            raise OSMFetchError(f"Rate limited by OSM API while fetching {name}") from e
+        logger.error("HTTP error fetching %s: %s", name, e)
+        raise OSMFetchError(f"HTTP error fetching {name}: {e}") from e
     except Exception as e:
         # Check for osmnx InsufficientResponseError
         if "InsufficientResponseError" in type(e).__name__ or "EmptyOverpassResponse" in str(e):
             logger.info("No %s data available for this location", name)
-            print(f"No {name} data available for this location.")
-        else:
-            logger.error("Unexpected error fetching %s: %s", name, e, exc_info=True)
-            print(f"OSMnx error while fetching {name}. Please try again later.")
-        return None
+            raise OSMFetchError(f"No {name} data available for this location") from e
+        logger.exception("Unexpected error fetching %s: %s", name, e)
+        raise OSMFetchError(f"Unexpected error fetching {name}: {e}") from e
 
 
 def get_crop_limits(

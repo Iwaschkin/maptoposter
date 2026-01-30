@@ -331,6 +331,180 @@ def test_get_backend_falls_back_to_matplotlib() -> None:
     assert backend.name == "matplotlib"
 
 
+def test_get_backend_returns_matplotlib_for_matplotlib() -> None:
+    """Test that get_backend returns matplotlib backend for 'matplotlib'."""
+    backend = get_backend("matplotlib")
+    assert backend.name == "matplotlib"
+
+
+def test_get_backend_returns_datashader_for_datashader() -> None:
+    """Test that get_backend returns datashader backend for 'datashader'."""
+    backend = get_backend("datashader")
+    assert backend.name == "datashader"
+
+
+class TestDatashaderBackend:
+    """Tests for DatashaderBackend."""
+
+    def test_render_roads_returns_false_without_datashader(self) -> None:
+        """Test render_roads returns False when datashader not available."""
+        from unittest.mock import patch
+
+        from maptoposter.render import DatashaderBackend, RenderLayer
+
+        backend = DatashaderBackend()
+
+        mock_ax = MagicMock()
+        layers: list[RenderLayer] = []
+        crop_xlim = (0.0, 100.0)
+        crop_ylim = (0.0, 100.0)
+        theme = {"road_default": "#333333"}
+
+        # Mock the import to fail
+        with patch.dict("sys.modules", {"datashader": None}):
+            # Force reimport to trigger ImportError
+            import builtins
+
+            original_import = builtins.__import__
+
+            def mock_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+                if name == "datashader":
+                    raise ImportError("No module named 'datashader'")
+                return original_import(name, *args, **kwargs)
+
+            with patch.object(builtins, "__import__", mock_import):
+                result = backend.render_roads(mock_ax, layers, crop_xlim, crop_ylim, theme)
+
+        assert result is False
+
+    def test_render_roads_empty_layers_returns_true(self) -> None:
+        """Test render_roads returns True for empty layers when datashader available."""
+        from maptoposter.render import DatashaderBackend, RenderLayer
+
+        backend = DatashaderBackend()
+
+        mock_ax = MagicMock()
+        mock_fig = MagicMock()
+        mock_fig.get_figwidth.return_value = 12.0
+        mock_fig.get_figheight.return_value = 18.0
+        mock_fig.dpi = 300
+        mock_ax.figure = mock_fig
+
+        layers: list[RenderLayer] = []
+        crop_xlim = (0.0, 100.0)
+        crop_ylim = (0.0, 100.0)
+        theme = {"road_default": "#333333"}
+
+        try:
+            import datashader  # noqa: F401
+
+            result = backend.render_roads(mock_ax, layers, crop_xlim, crop_ylim, theme)
+            assert result is True
+        except ImportError:
+            # Skip if datashader not installed
+            pytest.skip("datashader not installed")
+
+    def test_datashader_backend_has_correct_name(self) -> None:
+        """Test DatashaderBackend has name attribute set correctly."""
+        from maptoposter.render import DatashaderBackend
+
+        backend = DatashaderBackend()
+        assert backend.name == "datashader"
+
+    def test_matplotlib_backend_has_correct_name(self) -> None:
+        """Test MatplotlibBackend has name attribute set correctly."""
+        from maptoposter.render import MatplotlibBackend
+
+        backend = MatplotlibBackend()
+        assert backend.name == "matplotlib"
+
+    def test_matplotlib_backend_render_roads_returns_false(self) -> None:
+        """Test MatplotlibBackend.render_roads always returns False."""
+        from maptoposter.render import MatplotlibBackend, RenderLayer
+
+        backend = MatplotlibBackend()
+
+        mock_ax = MagicMock()
+        layers: list[RenderLayer] = []
+        crop_xlim = (0.0, 100.0)
+        crop_ylim = (0.0, 100.0)
+        theme = {"road_default": "#333333"}
+
+        result = backend.render_roads(mock_ax, layers, crop_xlim, crop_ylim, theme)
+        assert result is False
+
+
+class TestLayerCache:
+    """Tests for LayerCache singleton."""
+
+    def test_layer_cache_is_singleton(self) -> None:
+        """Test LayerCache returns same instance."""
+        from maptoposter.render import LayerCache
+
+        cache1 = LayerCache()
+        cache2 = LayerCache()
+        assert cache1 is cache2
+
+    def test_layer_cache_get_set(self) -> None:
+        """Test LayerCache get/set operations."""
+        from maptoposter.render import LayerCache
+
+        cache = LayerCache()
+        cache.reset()
+
+        # Set a value
+        cache.set("test_key", {"data": "value"})
+
+        # Get the value
+        result = cache.get("test_key")
+        assert result is not None
+        assert result["data"] == "value"
+
+        # Clean up
+        cache.reset()
+
+    def test_layer_cache_clear(self) -> None:
+        """Test LayerCache clear operation."""
+        from maptoposter.render import LayerCache
+
+        cache = LayerCache()
+        cache.reset()
+
+        cache.set("key1", {"data": 1})
+        cache.set("key2", {"data": 2})
+
+        count = cache.clear()
+        assert count == 2
+
+        # Verify cache is empty
+        assert cache.get("key1") is None
+        assert cache.get("key2") is None
+
+    def test_layer_cache_reset(self) -> None:
+        """Test LayerCache reset method."""
+        from maptoposter.render import LayerCache
+
+        cache = LayerCache()
+        cache.set("reset_test", {"data": "test"})
+
+        LayerCache.reset()
+
+        # After reset, cache should be empty
+        assert cache.get("reset_test") is None
+
+    def test_layer_cache_stats(self) -> None:
+        """Test LayerCache stats property."""
+        from maptoposter.render import LayerCache
+
+        cache = LayerCache()
+        cache.reset()
+
+        stats = cache.stats
+        assert "hits" in stats
+        assert "misses" in stats
+        assert "evictions" in stats
+
+
 class TestTypography:
     """Tests for typography-related methods."""
 

@@ -65,7 +65,7 @@ class TestPosterConfig:
         assert config.city == "Paris"
         assert config.country == "France"
         assert config.theme_name == "feature_based"
-        assert config.distance == 29000
+        assert config.distance == 12000  # Safe default for most cities
 
     def test_config_with_options(self) -> None:
         """Test config with custom options."""

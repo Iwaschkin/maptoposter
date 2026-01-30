@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -14,10 +13,6 @@ from maptoposter.postprocess import (
     apply_raster_effects,
     needs_raster_postprocessing,
 )
-
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass
@@ -76,19 +71,26 @@ class TestNeedsRasterPostprocessing:
 class TestApplyRasterEffects:
     """Tests for apply_raster_effects function."""
 
+    def test_returns_post_process_result(self) -> None:
+        """Result should be a PostProcessResult instance."""
+        image = create_test_image()
+        style = MockStyle()
+        result = apply_raster_effects(image, style)
+        assert isinstance(result, PostProcessResult)
+
     def test_returns_rgba_image(self) -> None:
-        """Result should always be RGBA mode."""
+        """Result image should always be RGBA mode."""
         image = Image.new("RGB", (50, 50), (100, 100, 100))
         style = MockStyle()
         result = apply_raster_effects(image, style)
-        assert result.mode == "RGBA"
+        assert result.image.mode == "RGBA"
 
     def test_preserves_image_size(self) -> None:
         """Effect should not change image dimensions."""
         image = create_test_image(120, 80)
         style = MockStyle(grain_strength=0.1, vignette_strength=0.1)
         result = apply_raster_effects(image, style)
-        assert result.size == (120, 80)
+        assert result.image.size == (120, 80)
 
     def test_grain_modifies_image(self) -> None:
         """Grain effect should modify pixel values."""
@@ -97,7 +99,7 @@ class TestApplyRasterEffects:
         result = apply_raster_effects(image, style)
 
         original_arr = np.array(image)
-        result_arr = np.array(result)
+        result_arr = np.array(result.image)
         # Images should differ due to grain noise
         assert not np.array_equal(original_arr, result_arr)
 
@@ -109,7 +111,7 @@ class TestApplyRasterEffects:
         result1 = apply_raster_effects(image.copy(), style)
         result2 = apply_raster_effects(image.copy(), style)
 
-        assert np.array_equal(np.array(result1), np.array(result2))
+        assert np.array_equal(np.array(result1.image), np.array(result2.image))
 
     def test_vignette_darkens_edges(self) -> None:
         """Vignette should make edges darker than center."""
@@ -117,7 +119,7 @@ class TestApplyRasterEffects:
         style = MockStyle(vignette_strength=0.5)
         result = apply_raster_effects(image, style)
 
-        result_arr = np.array(result)
+        result_arr = np.array(result.image)
         # Check that corners are darker than center
         center_brightness = np.mean(result_arr[45:55, 45:55, :3])
         corner_brightness = np.mean(result_arr[0:10, 0:10, :3])
@@ -131,7 +133,7 @@ class TestApplyRasterEffects:
         result = apply_raster_effects(image, style)
 
         original_arr = np.array(image)
-        result_arr = np.array(result)
+        result_arr = np.array(result.image)
         assert not np.array_equal(original_arr, result_arr)
 
     def test_no_effects_returns_unchanged_pixels(self) -> None:
@@ -141,7 +143,7 @@ class TestApplyRasterEffects:
         result = apply_raster_effects(image, style)
 
         original_arr = np.array(image)
-        result_arr = np.array(result)
+        result_arr = np.array(result.image)
         assert np.array_equal(original_arr, result_arr)
 
     def test_multiple_effects_can_combine(self) -> None:
@@ -156,8 +158,50 @@ class TestApplyRasterEffects:
         result = apply_raster_effects(image, style)
 
         original_arr = np.array(image)
-        result_arr = np.array(result)
+        result_arr = np.array(result.image)
         assert not np.array_equal(original_arr, result_arr)
+
+    def test_effects_applied_tracks_grain(self) -> None:
+        """effects_applied should include 'grain' when grain is applied."""
+        image = create_test_image()
+        style = MockStyle(grain_strength=0.5, seed=42)
+        result = apply_raster_effects(image, style)
+        assert "grain" in result.effects_applied
+
+    def test_effects_applied_tracks_vignette(self) -> None:
+        """effects_applied should include 'vignette' when vignette is applied."""
+        image = create_test_image()
+        style = MockStyle(vignette_strength=0.5)
+        result = apply_raster_effects(image, style)
+        assert "vignette" in result.effects_applied
+
+    def test_effects_applied_tracks_color_grading(self) -> None:
+        """effects_applied should include 'color_grading' when color grading is applied."""
+        image = create_test_image()
+        style = MockStyle(color_grading_strength=0.5)
+        result = apply_raster_effects(image, style)
+        assert "color_grading" in result.effects_applied
+
+    def test_effects_applied_empty_when_no_effects(self) -> None:
+        """effects_applied should be empty when no effects are applied."""
+        image = create_test_image()
+        style = MockStyle()
+        result = apply_raster_effects(image, style)
+        assert result.effects_applied == ()
+
+    def test_grain_seed_is_captured(self) -> None:
+        """grain_seed should be captured when grain is applied."""
+        image = create_test_image()
+        style = MockStyle(grain_strength=0.5, seed=12345)
+        result = apply_raster_effects(image, style)
+        assert result.grain_seed == 12345
+
+    def test_grain_seed_none_when_no_grain(self) -> None:
+        """grain_seed should be None when grain is not applied."""
+        image = create_test_image()
+        style = MockStyle(vignette_strength=0.5)
+        result = apply_raster_effects(image, style)
+        assert result.grain_seed is None
 
 
 class TestPostProcessResult:
@@ -168,6 +212,25 @@ class TestPostProcessResult:
         image = create_test_image()
         result = PostProcessResult(image=image)
         assert result.image is image
+
+    def test_holds_effects_applied(self) -> None:
+        """PostProcessResult should store effects_applied."""
+        image = create_test_image()
+        result = PostProcessResult(image=image, effects_applied=("grain", "vignette"))
+        assert result.effects_applied == ("grain", "vignette")
+
+    def test_holds_grain_seed(self) -> None:
+        """PostProcessResult should store grain_seed."""
+        image = create_test_image()
+        result = PostProcessResult(image=image, grain_seed=12345)
+        assert result.grain_seed == 12345
+
+    def test_defaults(self) -> None:
+        """PostProcessResult should have sensible defaults."""
+        image = create_test_image()
+        result = PostProcessResult(image=image)
+        assert result.effects_applied == ()
+        assert result.grain_seed is None
 
     def test_is_frozen(self) -> None:
         """PostProcessResult should be immutable."""

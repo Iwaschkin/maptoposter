@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "PosterConfig",
@@ -29,8 +32,6 @@ if TYPE_CHECKING:
 class ThemeValidationError(ValueError):
     """Raised when theme file is missing required keys."""
 
-    pass
-
 
 # Required keys that every theme must have
 REQUIRED_THEME_KEYS = frozenset(
@@ -50,6 +51,14 @@ REQUIRED_THEME_KEYS = frozenset(
         "road_path",
         "road_default",
     }
+)
+
+# Windows reserved filenames that cannot be used directly
+# These names (with or without extensions) are reserved by Windows
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
 )
 
 
@@ -127,7 +136,7 @@ def load_theme(theme_name: str = "feature_based") -> dict[str, str]:
     theme_file = themes_dir / f"{theme_name}.json"
 
     if not theme_file.exists():
-        print(f"⚠ Theme file '{theme_file}' not found. Using default feature_based theme.")
+        logger.warning("Theme file '%s' not found. Using default feature_based theme.", theme_file)
         return _get_default_theme()
 
     with theme_file.open("r", encoding="utf-8") as f:
@@ -143,9 +152,9 @@ def load_theme(theme_name: str = "feature_based") -> dict[str, str]:
                 f"Theme '{theme_name}' is missing required keys: {', '.join(sorted(missing_keys))}"
             )
 
-        print(f"✓ Loaded theme: {theme_dict.get('name', theme_name)}")
+        logger.info("Loaded theme: %s", theme_dict.get("name", theme_name))
         if description := theme_dict.get("description"):
-            print(f"  {description}")
+            logger.info("  %s", description)
         return theme_dict
 
 
@@ -192,11 +201,7 @@ def _sanitize_filename(name: str) -> str:
     sanitized = re.sub(r"_+", "_", sanitized)
 
     # Handle Windows reserved names
-    reserved = {"CON", "PRN", "AUX", "NUL"}
-    reserved.update(f"COM{i}" for i in range(1, 10))
-    reserved.update(f"LPT{i}" for i in range(1, 10))
-
-    if sanitized.upper() in reserved:
+    if sanitized.upper() in _WINDOWS_RESERVED_NAMES:
         sanitized = f"_{sanitized}"
 
     # Ensure non-empty
@@ -235,7 +240,7 @@ class PosterConfig:
     city: str
     country: str
     theme_name: str = "feature_based"
-    distance: int = 29000
+    distance: int = 12000  # Recommended range: 4000-20000m
     width: float = 12.0
     height: float = 16.0
     output_format: str = "png"

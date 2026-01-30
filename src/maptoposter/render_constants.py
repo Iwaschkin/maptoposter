@@ -10,9 +10,13 @@ __all__ = [
     "BASE_FONT_COORDS",
     "BASE_FONT_MAIN",
     "BASE_FONT_SUB",
+    "CITY_NAME_Y_MAX",
     "CITY_NAME_Y_POS",
+    "COORDS_Y_MAX",
     "COORDS_Y_POS",
+    "COUNTRY_LABEL_Y_MAX",
     "COUNTRY_LABEL_Y_POS",
+    "DIVIDER_Y_MAX",
     "DIVIDER_Y_POS",
     "GRADIENT_HEIGHT_FRACTION",
     "ROAD_WIDTH_DEFAULT",
@@ -33,6 +37,13 @@ COORDS_Y_POS = 0.06
 DIVIDER_Y_POS = 0.12
 ATTRIBUTION_X_POS = 0.98
 ATTRIBUTION_Y_POS = 0.02
+
+# Typography position clamp limits (CR-013)
+# Prevent text going too high on wide aspect ratio posters
+CITY_NAME_Y_MAX = 0.35
+DIVIDER_Y_MAX = 0.30
+COUNTRY_LABEL_Y_MAX = 0.25
+COORDS_Y_MAX = 0.20
 
 # Gradient constants
 GRADIENT_HEIGHT_FRACTION = 0.25

@@ -116,7 +116,7 @@ def _list_themes() -> None:
                 theme_data = json.load(f)
                 display_name = theme_data.get("name", theme_name)
                 description = theme_data.get("description", "")
-        except Exception:
+        except (OSError, json.JSONDecodeError, KeyError):
             display_name = theme_name
             description = ""
 
@@ -201,8 +201,8 @@ Examples:
         "--distance",
         "-d",
         type=int,
-        default=29000,
-        help="Map radius in meters (default: 29000)",
+        default=12000,
+        help="Map radius in meters (default: 12000, recommended: 4000-20000)",
     )
     parser.add_argument(
         "--width",
@@ -267,31 +267,73 @@ Examples:
     return parser
 
 
-def _parse_batch_file(batch_file: str) -> list[tuple[str, str]]:
-    """Parse a batch file containing city,country pairs.
+def _parse_batch_file(
+    batch_file: str,
+) -> list[dict[str, str | None]]:
+    """Parse a batch file containing city,country pairs (CSV with optional headers).
+
+    Supports two formats:
+    1. CSV with headers: city,country,display_name,country_label
+       (display_name and country_label are optional columns)
+    2. Legacy format: city,country per line (no headers)
 
     Args:
         batch_file: Path to the batch file.
 
     Returns:
-        List of (city, country) tuples.
+        List of dicts with keys: city, country, display_name, country_label.
     """
-    cities: list[tuple[str, str]] = []
+    import csv
+
+    cities: list[dict[str, str | None]] = []
     path = Path(batch_file).expanduser()
 
-    with path.open("r", encoding="utf-8") as f:
-        for line_num, raw_line in enumerate(f, 1):
-            stripped = raw_line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            parts = stripped.split(",")
-            if len(parts) != 2:
-                logger.warning("Skipping invalid line %d: %s", line_num, stripped)
-                continue
-            city = parts[0].strip()
-            country = parts[1].strip()
-            if city and country:
-                cities.append((city, country))
+    with path.open("r", encoding="utf-8", newline="") as f:
+        # Peek at first line to determine format
+        first_line = f.readline().strip()
+        f.seek(0)
+
+        # Check if first line looks like a CSV header
+        first_lower = first_line.lower()
+        has_header = first_lower.startswith(("city,", '"city"'))
+
+        if has_header:
+            reader = csv.DictReader(f)
+            for row_num, row in enumerate(reader, 2):  # Start at 2 (header is line 1)
+                city = row.get("city", "").strip()
+                country = row.get("country", "").strip()
+                if not city or not country:
+                    logger.warning("Skipping row %d: missing city or country", row_num)
+                    continue
+                cities.append(
+                    {
+                        "city": city,
+                        "country": country,
+                        "display_name": row.get("display_name", "").strip() or None,
+                        "country_label": row.get("country_label", "").strip() or None,
+                    }
+                )
+        else:
+            # Legacy format: city,country per line
+            for line_num, raw_line in enumerate(f, 1):
+                stripped = raw_line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                parts = stripped.split(",")
+                if len(parts) < 2:
+                    logger.warning("Skipping invalid line %d: %s", line_num, stripped)
+                    continue
+                city = parts[0].strip()
+                country = parts[1].strip()
+                if city and country:
+                    cities.append(
+                        {
+                            "city": city,
+                            "country": country,
+                            "display_name": None,
+                            "country_label": None,
+                        }
+                    )
 
     return cities
 
@@ -306,6 +348,8 @@ def _generate_single_city(
     height: float,
     render_backend: str,
     style_config: StyleConfig | None,
+    country_label: str | None = None,
+    name_label: str | None = None,
 ) -> tuple[str, bool, str]:
     """Generate a poster for a single city.
 
@@ -319,6 +363,8 @@ def _generate_single_city(
         height: Image height in inches.
         render_backend: Rendering backend.
         style_config: Optional style configuration.
+        country_label: Optional country label override.
+        name_label: Optional display name override.
 
     Returns:
         Tuple of (city_name, success, error_message).
@@ -336,6 +382,8 @@ def _generate_single_city(
             width=width,
             height=height,
             output_format=output_format,
+            country_label=country_label,
+            name_label=name_label,
             theme=theme,
             style_config=style_config,
             render_backend=render_backend,
@@ -393,18 +441,25 @@ def _process_batch(parsed: argparse.Namespace) -> int:
     futures_to_city: dict[Any, str] = {}
 
     with ThreadPoolExecutor(max_workers=parsed.workers) as executor:
-        for city, country in cities:
+        for city_entry in cities:
+            # city and country are guaranteed to be non-None by _parse_batch_file
+            city = city_entry["city"]
+            country = city_entry["country"]
+            if city is None or country is None:
+                continue  # Skip invalid entries (shouldn't happen)
             future = executor.submit(
                 _generate_single_city,
-                city,
-                country,
-                theme_name,
-                parsed.format,
-                parsed.distance,
-                parsed.width,
-                parsed.height,
-                parsed.render_backend,
-                style_config,
+                city=city,
+                country=country,
+                theme_name=theme_name,
+                output_format=parsed.format,
+                distance=parsed.distance,
+                width=parsed.width,
+                height=parsed.height,
+                render_backend=parsed.render_backend,
+                style_config=style_config,
+                country_label=city_entry.get("country_label"),
+                name_label=city_entry.get("display_name"),
             )
             futures_to_city[future] = city
 
@@ -565,6 +620,17 @@ def cli(args: list[str] | None = None) -> int:
         _print_examples()
         return 1
 
+    # Validate distance parameter (CR-007)
+    if parsed.distance < 1000:
+        print("Error: Distance must be at least 1000 meters.")
+        return 1
+    if parsed.distance > 25000:
+        logger.warning(
+            "Distance %d meters is very large and may cause slow downloads. "
+            "Recommended range: 4000-20000 meters.",
+            parsed.distance,
+        )
+
     available_themes = get_available_themes()
     if not available_themes:
         print("No themes found in 'themes/' directory.")
@@ -592,53 +658,44 @@ def cli(args: list[str] | None = None) -> int:
     if parsed.all_themes and preset_style is None:
         preset_style = StyleConfig(enable_layer_cache=True)
 
-    try:
-        coords = get_coordinates(parsed.city, parsed.country)
-        logger.info(
-            "Starting render for %s, %s with format %s and backend %s",
-            parsed.city,
-            parsed.country,
-            parsed.format,
-            parsed.render_backend,
+    logger.info(
+        "Starting render for %s, %s with format %s and backend %s",
+        parsed.city,
+        parsed.country,
+        parsed.format,
+        parsed.render_backend,
+    )
+
+    any_failed = False
+    for current_theme in themes_to_generate:
+        logger.info("Rendering theme %s", current_theme)
+        city_name, success, error = _generate_single_city(
+            city=parsed.city,
+            country=parsed.country,
+            theme_name=current_theme,
+            output_format=parsed.format,
+            distance=parsed.distance,
+            width=parsed.width,
+            height=parsed.height,
+            render_backend=parsed.render_backend,
+            style_config=preset_style,
+            country_label=parsed.country_label,
+            name_label=parsed.name_label,
         )
+        if not success:
+            print(f"✗ Error generating {current_theme}: {error}")
+            any_failed = True
 
-        for current_theme in themes_to_generate:
-            logger.info("Rendering theme %s", current_theme)
-            theme = load_theme(current_theme)
-            output_file = generate_output_filename(
-                parsed.city,
-                current_theme,
-                parsed.format,
-            )
-
-            config = PosterConfig(
-                city=parsed.city,
-                country=parsed.country,
-                theme_name=current_theme,
-                distance=parsed.distance,
-                width=parsed.width,
-                height=parsed.height,
-                output_format=parsed.format,
-                country_label=parsed.country_label,
-                theme=theme,
-                style_config=preset_style,
-                render_backend=parsed.render_backend,
-            )
-
-            renderer = PosterRenderer(config)
-            renderer.render(coords, output_file)
-
+    if any_failed:
         print("\n" + "=" * 50)
-        print("✓ Poster generation complete!")
+        print("✗ Some poster generations failed")
         print("=" * 50)
-        return 0
-
-    except Exception as e:
-        print(f"\n✗ Error: {e}")
-        import traceback
-
-        traceback.print_exc()
         return 1
+
+    print("\n" + "=" * 50)
+    print("✓ Poster generation complete!")
+    print("=" * 50)
+    return 0
 
 
 def main() -> NoReturn:

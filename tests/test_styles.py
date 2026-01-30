@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,6 +14,10 @@ from maptoposter.styles import (
     get_style_preset,
     load_style_pack,
 )
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_get_available_presets_contains_noir() -> None:

@@ -89,7 +89,7 @@ coords_y = min(coords_y, 0.20)
 
 ### Code Flow
 ```
-render() 
+render()
   → calculates aspect_ratio = width / height
   → post_process(ax, point, scale_factor, aspect_ratio)
     → _add_typography(ax, point, scale_factor, aspect_ratio)

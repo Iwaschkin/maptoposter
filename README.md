@@ -85,7 +85,7 @@ python -m maptoposter --city <city> --country <country> [options]
 | **OPTIONAL:** `--theme` | `-t` | Theme name | feature_based |
 | **OPTIONAL:** `--preset` | | Style preset (overrides theme) | |
 | **OPTIONAL:** `--style-pack` | | JSON style pack file (overrides theme) | |
-| **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 29000 |
+| **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 12000 |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
 | **OPTIONAL:** `--list-presets` | | List all available presets | |
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |

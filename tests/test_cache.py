@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from maptoposter.cache import (
@@ -13,6 +13,10 @@ from maptoposter.cache import (
     get_cache_dir,
     get_cache_stats,
 )
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestCacheDir:

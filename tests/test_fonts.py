@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from matplotlib.font_manager import FontProperties
 
 from maptoposter.fonts import FontSet, load_fonts
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestFontSet:

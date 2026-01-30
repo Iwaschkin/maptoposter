@@ -48,6 +48,8 @@ class PostProcessResult:
     """Result container for post-processing operations."""
 
     image: Image.Image
+    effects_applied: tuple[str, ...] = ()
+    grain_seed: int | None = None
 
 
 def needs_raster_postprocessing(fmt: str, style: RasterStyle) -> bool:
@@ -65,22 +67,41 @@ def needs_raster_postprocessing(fmt: str, style: RasterStyle) -> bool:
     )
 
 
-def apply_raster_effects(image: Image.Image, style: RasterStyle) -> Image.Image:
-    """Apply raster effects to a PIL image based on style settings."""
+def apply_raster_effects(image: Image.Image, style: RasterStyle) -> PostProcessResult:
+    """Apply raster effects to a PIL image based on style settings.
+
+    Args:
+        image: The PIL image to process.
+        style: The raster style configuration.
+
+    Returns:
+        PostProcessResult containing the processed image and metadata.
+    """
+    effects: list[str] = []
     result = image.convert("RGBA")
+
     if style.grain_strength > 0:
         result = _apply_grain(result, style.grain_strength, style.seed)
+        effects.append("grain")
     if style.vignette_strength > 0:
         result = _apply_vignette(result, style.vignette_strength)
+        effects.append("vignette")
     if style.texture_strength > 0 and style.paper_texture_path:
         result = _apply_texture(
             result,
             style.paper_texture_path,
             style.texture_strength,
         )
+        effects.append("texture")
     if style.color_grading_strength > 0:
         result = _apply_color_grading(result, style.color_grading_strength)
-    return result
+        effects.append("color_grading")
+
+    return PostProcessResult(
+        image=result,
+        effects_applied=tuple(effects),
+        grain_seed=style.seed if style.grain_strength > 0 else None,
+    )
 
 
 def _apply_grain(image: Image.Image, strength: float, seed: int | None) -> Image.Image:
@@ -120,6 +141,5 @@ def _apply_texture(image: Image.Image, texture_path: str, strength: float) -> Im
 
 def _apply_color_grading(image: Image.Image, strength: float) -> Image.Image:
     factor = 1 + min(strength, 1.0) * 0.1
-    result = ImageEnhance.Color(image).enhance(factor)
-    result = ImageEnhance.Contrast(result).enhance(factor)
-    return result
+    color_enhanced = ImageEnhance.Color(image).enhance(factor)
+    return ImageEnhance.Contrast(color_enhanced).enhance(factor)

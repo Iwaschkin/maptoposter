@@ -11,12 +11,16 @@ import logging
 import os
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 
 if TYPE_CHECKING:
-    pass  # Types imported only for type checking
+    from geopandas import GeoDataFrame
+    from networkx import MultiDiGraph
 
+# Type alias for cached values - defined at module level for runtime access
+# The actual types are only available at type-checking time
+CacheValue: TypeAlias = "tuple[float, float] | MultiDiGraph | GeoDataFrame"
 
 __all__ = [
     "CacheType",
@@ -63,7 +67,7 @@ def _cache_path(key: str, cache_type: CacheType) -> Path:
     return get_cache_dir() / f"{safe}{ext}"
 
 
-def cache_get(key: str, cache_type: CacheType) -> Any | None:
+def cache_get(key: str, cache_type: CacheType) -> CacheValue | None:
     """Retrieve a cached value by key.
 
     Uses safe deserialization formats (JSON, GraphML, GeoParquet) to prevent
@@ -91,14 +95,14 @@ def cache_get(key: str, cache_type: CacheType) -> Any | None:
             logger.debug("Cache hit", extra={"key": key, "type": cache_type.value})
             return data
 
-        elif cache_type == CacheType.GRAPH:
+        if cache_type == CacheType.GRAPH:
             import osmnx as ox
 
             result = ox.load_graphml(path)
             logger.debug("Cache hit", extra={"key": key, "type": cache_type.value})
             return result
 
-        elif cache_type == CacheType.GEODATA:
+        if cache_type == CacheType.GEODATA:
             import geopandas as gpd
 
             result = gpd.read_parquet(path)
@@ -112,7 +116,7 @@ def cache_get(key: str, cache_type: CacheType) -> Any | None:
         return None
 
 
-def cache_set(key: str, value: Any, cache_type: CacheType) -> bool:
+def cache_set(key: str, value: CacheValue, cache_type: CacheType) -> bool:
     """Store a value in the cache.
 
     Uses safe serialization formats (JSON, GraphML, GeoParquet) to prevent
@@ -141,7 +145,8 @@ def cache_set(key: str, value: Any, cache_type: CacheType) -> bool:
             ox.save_graphml(value, path)
 
         elif cache_type == CacheType.GEODATA:
-            value.to_parquet(path)
+            # GeoDataFrame has to_parquet method
+            value.to_parquet(path)  # type: ignore[union-attr]
 
         else:
             logger.warning("Unknown cache type: %s", cache_type)

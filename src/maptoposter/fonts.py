@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from matplotlib.font_manager import FontProperties
 
 from .config import get_fonts_dir
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 __all__ = ["FontSet", "load_fonts"]
