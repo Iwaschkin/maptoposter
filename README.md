@@ -1,6 +1,6 @@
 # City Map Poster Generator
 
-Generate beautiful, minimalist map posters for any city in the world.
+Generate beautiful, minimalist map posters for any city in the world. (forked from https://github.com/originalankur/maptoposter)
 
 ## Installation
 
